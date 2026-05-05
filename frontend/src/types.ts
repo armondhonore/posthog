@@ -1082,6 +1082,8 @@ export enum PropertyFilterType {
     EventMetadata = 'event_metadata',
     /** Person properties */
     Person = 'person',
+    /** Top-level columns on the persons table (e.g. created_at), not properties JSON */
+    PersonMetadata = 'person_metadata',
     Element = 'element',
     /** Event property with "$feature/" prepended */
     Feature = 'feature',
@@ -1135,6 +1137,11 @@ export interface RevenueAnalyticsPropertyFilter extends BasePropertyFilter {
 /** Sync with nodejs/src/types.ts */
 export interface PersonPropertyFilter extends BasePropertyFilter {
     type: PropertyFilterType.Person
+    operator: PropertyOperator
+}
+
+export interface PersonMetadataPropertyFilter extends BasePropertyFilter {
+    type: PropertyFilterType.PersonMetadata
     operator: PropertyOperator
 }
 
@@ -1238,6 +1245,7 @@ export interface EmptyPropertyFilter {
 export type AnyPropertyFilter =
     | EventPropertyFilter
     | PersonPropertyFilter
+    | PersonMetadataPropertyFilter
     | ElementPropertyFilter
     | EventMetadataPropertyFilter
     | SessionPropertyFilter
@@ -1260,6 +1268,7 @@ export type AnyPropertyFilter =
 /** Any filter type supported by `property_to_expr(scope="person", ...)`. */
 export type AnyPersonScopeFilter =
     | PersonPropertyFilter
+    | PersonMetadataPropertyFilter
     | CohortPropertyFilter
     | HogQLPropertyFilter
     | EmptyPropertyFilter
@@ -4596,6 +4605,7 @@ export enum PropertyDefinitionType {
     EventMetadata = 'event_metadata',
     RevenueAnalytics = 'revenue_analytics',
     Person = 'person',
+    PersonMetadata = 'person_metadata',
     Group = 'group',
     Session = 'session',
     LogEntry = 'log_entry',
