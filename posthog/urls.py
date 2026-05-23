@@ -29,13 +29,15 @@ from posthog.api import (
     uploaded_media,
     user,
 )
-from posthog.api.github_callback.personal_finish import github_link_complete
+from posthog.api.github_callback.router import handle_setup_url
+from posthog.api.id_jag import IdJagViewSet
 from posthog.api.oauth.connected_apps import ConnectedAppsViewSet
 from posthog.api.oauth.raycast_metadata import RAYCAST_METADATA_PATH, RaycastClientMetadataView
 from posthog.api.oauth.wizard_metadata import WIZARD_METADATA_PATH, WizardClientMetadataView
 from posthog.api.query import progress
 from posthog.api.sdk_health import sdk_health
 from posthog.api.two_factor_qrcode import CacheAwareQRGeneratorView
+from posthog.api.user_integration import github_link_complete
 from posthog.api.utils import hostname_in_allowed_url_list
 from posthog.api.web_experiment import web_experiments
 from posthog.api.zendesk_orgcheck import ensure_zendesk_organization
@@ -401,6 +403,7 @@ urlpatterns = [
     path("site_app/<int:id>/<str:token>/<str:hash>/", site_app.get_site_app),
     re_path(r"^demo.*", login_required(demo_route)),
     path("", include((oauth2_urls, "oauth2_provider"), namespace="oauth2_provider")),
+    opt_slash_path("id-jag/token", IdJagViewSet.as_view(), name="id_jag_token"),
     # ingestion
     # NOTE: When adding paths here that should be public make sure to update ALWAYS_ALLOWED_ENDPOINTS in middleware.py
     opt_slash_path("report", report.get_csp_event),  # CSP violation reports
@@ -414,6 +417,7 @@ urlpatterns = [
     # GitHub account linking (identity-only, separate from the login pipeline).
     # Must precede `social_django.urls` so the latter's `complete/<str:backend>/` doesn't swallow it.
     path("complete/github-link/", github_link_complete, name="github_link_complete"),
+    opt_slash_path("integrations/github/callback", handle_setup_url, name="github_team_integration_setup_callback"),
     path("", include("social_django.urls", namespace="social")),
     path("uploaded_media/<str:image_uuid>", uploaded_media.download),
     opt_slash_path("slack/interactivity-callback", posthog_code_interactivity_handler),

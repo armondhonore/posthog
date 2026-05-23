@@ -103,11 +103,8 @@ tools:
     integrations-github-branches-retrieve:
         operation: integrations_github_branches_retrieve
         enabled: false
-    integrations-github-link-existing-create:
-        operation: integrations_github_link_existing_create
-        enabled: false
-    integrations-github-oauth-authorize-create:
-        operation: integrations_github_oauth_authorize_create
+    integrations-github-prepare-callback-create:
+        operation: integrations_github_prepare_callback_create
         enabled: false
     integrations-github-repos-refresh-create:
         operation: integrations_github_repos_refresh_create
@@ -176,4 +173,25 @@ tools:
         enabled: false
     role-external-references-lookup-retrieve:
         operation: role_external_references_lookup_retrieve
+        enabled: false
+    users-integrations-github-branches-retrieve:
+        operation: users_integrations_github_branches_retrieve
+        enabled: false
+    users-integrations-github-destroy:
+        operation: users_integrations_github_destroy
+        enabled: false
+    users-integrations-github-prepare-callback-create:
+        operation: users_integrations_github_prepare_callback_create
+        enabled: false
+    users-integrations-github-repos-refresh-create:
+        operation: users_integrations_github_repos_refresh_create
+        enabled: false
+    users-integrations-github-repos-retrieve:
+        operation: users_integrations_github_repos_retrieve
+        enabled: false
+    users-integrations-github-start-create:
+        operation: users_integrations_github_start_create
+        enabled: false
+    users-integrations-list:
+        operation: users_integrations_list
         enabled: false

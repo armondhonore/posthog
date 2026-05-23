@@ -263,7 +263,10 @@ export const IntegrationsDomainConnectApplyUrlCreateBody = /* @__PURE__ */ zod
     .describe('Standard Integration serializer.')
 
 /**
- * Reuse a GitHub installation already linked to a sibling team in the same organization.
+ * Seed GitHub setup callback state without redirecting to GitHub.
+
+Used when the user opens an existing installation's settings on github.com (e.g. PostHog
+Code "Update in GitHub") so the subsequent Setup URL redirect can be validated.
  */
 export const IntegrationsGithubLinkExistingCreateBody = /* @__PURE__ */ zod
     .object({
@@ -314,8 +317,17 @@ export const IntegrationsGithubLinkExistingCreateBody = /* @__PURE__ */ zod
     })
     .describe('Standard Integration serializer.')
 
+export const IntegrationsGithubPrepareCallbackCreateBody = /* @__PURE__ */ zod.object({
+    next: zod
+        .string()
+        .optional()
+        .describe(
+            'Relative URL to redirect to after GitHub setup completes (e.g. account-connected for PostHog Code).'
+        ),
+})
+
 /**
- * Mint a User OAuth URL to bootstrap a fresh `code` when the install flow returns without one.
+ * Seed personal GitHub manage callback state before opening installation settings on GitHub.
  */
 export const IntegrationsGithubOauthAuthorizeCreateBody = /* @__PURE__ */ zod
     .object({
@@ -424,4 +436,41 @@ export const IntegrationsRequestAccessCreateBody = /* @__PURE__ */ zod.object({
         .describe(
             'Explanation from the requester of why this integration is needed. Shown to admins in the notification email.'
         ),
+})
+
+export const UsersIntegrationsGithubPrepareCallbackCreateBody = /* @__PURE__ */ zod.object({
+    installation_id: zod.string().describe('GitHub App installation id being managed on github.com.'),
+})
+
+/**
+ * Start GitHub linking: either full App install or OAuth-only (user-to-server).
+
+``**_kwargs`` absorbs ``parent_lookup_uuid`` from the nested
+``/api/users/{uuid}/integrations/`` router (same pattern as ``local_evaluation``
+under projects).
+
+Usually returns ``install_url`` pointing at ``/installations/new`` so the
+user can pick any GitHub org (new or already connected).  GitHub's install
+page handles both cases: orgs where the app is installed show "Configure"
+(no admin needed), orgs where it isn't show "Install" (needs admin).
+
+**First-party app fast path:** when ``connect_from`` is one of
+``APP_CONNECT_FROM_VALUES`` (e.g. ``"posthog_code"`` or ``"posthog_mobile"``),
+the current project already has a team-level GitHub installation, and the
+user has no ``UserIntegration`` for that installation yet, we skip the org
+picker and redirect straight to ``/login/oauth/authorize`` so the user
+only authorizes themselves and returns to the originating client immediately.
+
+In both cases the response key is ``install_url`` for compatibility with callers.
+ * @summary Start GitHub personal integration linking
+ */
+export const UsersIntegrationsGithubStartCreateBody = /* @__PURE__ */ zod.object({
+    team_id: zod
+        .number()
+        .nullish()
+        .describe("Optional team\/project id (e.g. PostHog Code); web UI uses the session's current team."),
+    connect_from: zod
+        .string()
+        .optional()
+        .describe('Optional client hint (e.g. posthog_code) for return routing after OAuth.'),
 })
