@@ -48098,6 +48098,7 @@ export namespace Schemas {
     }
 
     /**
+<<<<<<< HEAD
      * Request body for creating or updating a task automation.
      */
     export interface TaskAutomationWrite {
@@ -48147,6 +48148,16 @@ export namespace Schemas {
      * calls; if the user has unregistered the underlying push token, the value
      * won't resolve and the call returns 404 — at which point pushes were
      * already not going there anyway.
+=======
+     * Request body for the presence beacon and beacon-leave endpoints.
+
+    `device_id` is the UUID of the caller's `UserPushToken` row, which the
+    client received when it registered for push via `/api/users/@me/push_tokens/`.
+    The client is expected to use the same identifier on the beacon and leave
+    calls; if the user has unregistered the underlying push token, the value
+    won't resolve and the call returns 404 — at which point pushes were
+    already not going there anyway.
+>>>>>>> 37aa7a2d3d7 (chore: update OpenAPI generated types)
      */
     export interface TaskPresenceBeaconRequest {
       /** UUID of the caller's UserPushToken (returned by `/api/users/@me/push_tokens/` on register). */
