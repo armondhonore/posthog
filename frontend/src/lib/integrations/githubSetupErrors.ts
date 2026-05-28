@@ -1,5 +1,5 @@
 export const GITHUB_INSTALL_PENDING_MESSAGE =
-    'Your request to connect to GitHub has been sent to the organization owners. They will need to complete the installation.'
+    'GitHub requires an organization owner to complete this installation. If you requested access, an organization owner will need to approve it.'
 
 export const GITHUB_SETUP_ERROR_MESSAGES: Record<string, string> = {
     access_denied: 'GitHub authorization was canceled.',
