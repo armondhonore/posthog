@@ -25,7 +25,6 @@ import type {
     OrganizationIntegrationApi,
     PaginatedIntegrationConfigListApi,
     PaginatedRoleExternalReferenceListApi,
-    PaginatedUserGitHubIntegrationListResponseListApi,
     PatchedIntegrationConfigApi,
     PatchedOrganizationIntegrationApi,
     RoleExternalReferenceApi,
@@ -33,12 +32,6 @@ import type {
     RoleExternalReferencesLookupRetrieveParams,
     RoleLookupResponseApi,
     SlackChannelsResponseApi,
-    UserGitHubLinkStartRequestApi,
-    UserGitHubLinkStartResponseApi,
-    UserGitHubPrepareCallbackRequestApi,
-    UsersIntegrationsGithubBranchesRetrieveParams,
-    UsersIntegrationsGithubReposRetrieveParams,
-    UsersIntegrationsListParams,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
