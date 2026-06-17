@@ -3587,6 +3587,7 @@ mod test_match_properties {
             group_type_index: None,
             negation: None,
             compiled_regex: None,
+            extra: Default::default(),
         };
 
         // A user-set "created_at" property must NOT satisfy a person_metadata filter:
