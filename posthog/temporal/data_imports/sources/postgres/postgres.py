@@ -174,6 +174,21 @@ _CONNECTION_DROPPED_ERROR_SUBSTRINGS = (
 # XX000 internal errors (data corruption, etc.) carry a different code and stay non-recoverable.
 _POOLER_CONNECTION_DROPPED_ERROR_SUBSTRINGS = ("edbhandlerexited",)
 
+# Connect-time capacity errors: the source refuses a *new* connection because it has hit a
+# connection limit, not because anything is misconfigured. PostgreSQL raises "sorry, too many
+# clients already" once max_connections is reached, "remaining connection slots are reserved for
+# roles with the SUPERUSER attribute" once only the superuser_reserved_connections slots remain,
+# and "too many connections for role" once a role's own CONNECTION LIMIT is hit. All three are
+# transient capacity conditions on the customer's database — a slot frees the moment another
+# connection closes — so a fresh connect after a short backoff usually succeeds. Retried in-process
+# on the connect path (see `_retry_on_connection_dropped`); kept retryable and intentionally NOT
+# added to `get_non_retryable_errors` for the same reason as pooler saturation (see source.py).
+_CONNECTION_LIMIT_ERROR_SUBSTRINGS = (
+    "sorry, too many clients already",
+    "remaining connection slots are reserved",
+    "too many connections for role",
+)
+
 # Exception types that can carry a connection-dropped error. ProtocolViolation is
 # PgBouncer's synthetic error packet; OperationalError is libpq detecting the dead
 # socket. IdleInTransactionSessionTimeout (SQLSTATE 25P03) is what Postgres raises
@@ -231,6 +246,19 @@ def _is_connection_dropped_error(error: BaseException) -> bool:
     return False
 
 
+def _is_connection_limit_error(error: BaseException) -> bool:
+    """True if the source refused a new connection because it's at a connection limit.
+
+    Distinct from `_is_connection_dropped_error`: the connection was never established, so this is
+    only meaningful on the connect path (`_retry_on_connection_dropped`), not for mid-stream fetch
+    failures on an already-open connection.
+    """
+    if not isinstance(error, psycopg.OperationalError):
+        return False
+    message = " ".join(str(arg) for arg in error.args).lower()
+    return any(substring in message for substring in _CONNECTION_LIMIT_ERROR_SUBSTRINGS)
+
+
 def _raise_if_setup_connection_broken(connection: psycopg.Connection) -> None:
     """Surface a connection dropped during metadata discovery as a retryable error.
 
@@ -260,22 +288,24 @@ def _retry_on_connection_dropped(
     *,
     max_attempts: int = 5,
 ) -> _T:
-    """Run `operation`, retrying transient connection-dropped errors with bounded backoff.
+    """Run `operation`, retrying transient connection errors with bounded backoff.
 
-    Permanent errors (auth failures, SSL-required) are re-raised immediately because
-    `_is_connection_dropped_error` only matches transient drops.
+    Retries two transient classes that recover on a fresh connection: mid-stream drops
+    (`_is_connection_dropped_error`) and connect-time connection-limit refusals
+    (`_is_connection_limit_error`). Permanent errors (auth failures, SSL-required) are re-raised
+    immediately because neither predicate matches them.
     """
     attempt = 0
     while True:
         try:
             return operation()
         except _CONNECTION_DROPPED_ERROR_TYPES as e:
-            if not _is_connection_dropped_error(e):
+            if not (_is_connection_dropped_error(e) or _is_connection_limit_error(e)):
                 raise
             attempt += 1
             if attempt >= max_attempts:
                 raise
-            logger.debug(f"Connection dropped ({e}). Retrying (attempt {attempt}/{max_attempts})")
+            logger.debug(f"Transient connection error ({e}). Retrying (attempt {attempt}/{max_attempts})")
             time.sleep(min(2 * attempt, 30))
 
 
@@ -292,8 +322,9 @@ def _connect_with_dropped_retry(
     the very reconnect that bootstraps the recovery can itself hit a still-recovering
     source and fail with another connection-dropped error. Without this, that
     transient failure escapes the recovery loop and fails the whole sync. Retry with
-    bounded backoff; permanent errors (auth failures, SSL-required) are re-raised
-    immediately because `_is_connection_dropped_error` only matches transient drops.
+    bounded backoff; a still-saturated source that refuses the reconnect with a
+    connection-limit error is retried the same way. Permanent errors (auth failures,
+    SSL-required) are re-raised immediately because neither transient predicate matches them.
     """
     return _retry_on_connection_dropped(connect, logger, max_attempts=max_attempts)
 
