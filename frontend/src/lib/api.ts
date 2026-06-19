@@ -2975,6 +2975,8 @@ const api = {
                 serviceNames?: string[]
                 statusCodes?: number[]
                 filterGroup?: PropertyGroupFilter
+                // true counts root spans only (Traces view); false/absent counts every span (Spans view).
+                rootSpans?: boolean
             },
             signal?: AbortSignal
         ): Promise<{
