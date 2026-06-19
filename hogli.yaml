@@ -1053,7 +1053,7 @@ environment:
         hidden: true
     start:ai:gateway:
         bin_script: start-ai-gateway
-        description: 'Run the local Go ai-gateway from source in open mode (deps via docker compose) and top up the anonymous-team ledger for AGENT_USE_AI_GATEWAY dev'
+        description: 'Bring up the local Go ai-gateway via docker compose and top up the anonymous-team ledger for AGENT_USE_AI_GATEWAY dev'
         hidden: true
     dockerignore:drop:check:
         bin_script: dockerignore-drop-check
@@ -1070,4 +1070,12 @@ environment:
     inject_mcp_intents:
         bin_script: inject_mcp_intents.py
         description: 'Used when developing MCP Analytics locally and trying to load some intents'
+        hidden: true
+    dev:sandbox:shims:selftest:
+        bin_script: dev-sandbox-shims-selftest
+        description: 'Verify the uv/pnpm dev-sandbox shims route install subcommands correctly'
+        hidden: true
+    setup:gateway:e2e:
+        bin_script: setup-gateway-e2e
+        description: 'Provision the local ai-gateway e2e: enable the team, mint a phs_, publish the credential blob, fund the ledger'
         hidden: true

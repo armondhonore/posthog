@@ -1,84 +1,71 @@
 #!/usr/bin/env bash
-# Run the external Go ai-gateway (github.com/PostHog/ai-gateway) in OPEN mode
-# for agent-runner routing: anonymous principal, deps via docker compose (its
-# compose.yaml ships deps only; the binary runs from source), team_id=0 ledger
-# seeded after /readyz so open-mode requests pass admission. Open mode is forced
-# regardless of the clone's .env; for the resolver flow see the gateway repo's
-# docs/local-resolver-dev.md. Pairs with AGENT_USE_AI_GATEWAY=true on agent-runner.
+# hogli `ai_gateway` capability entry — one-shot local ai-gateway in resolver
+# mode with a real phs_ credential.
+#
+# Provisioning lives in bin/setup-gateway-e2e: enable the team, mint the phs_,
+# publish the credential blob to the gateway's valkey, set resolver mode, fund
+# the ledger. We run it (retried until PostHog's DB/migrations are ready), start
+# the gateway on the host under air, then once it's up — and has created its
+# ledger schema on first boot — re-run setup so the topup lands on a truly fresh
+# stack. The runner picks up the gateway from its dev config defaults (no
+# .env.local needed); with the ai_gateway capability disabled this is unused.
 
 set -euo pipefail
 
-# Default clone path: sibling of this posthog checkout; override AI_GATEWAY_REPO.
-POSTHOG_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-AI_GATEWAY_REPO="${AI_GATEWAY_REPO:-$(dirname "$POSTHOG_ROOT")/ai-gateway}"
-TOPUP_USD="${AI_GATEWAY_DEV_TOPUP_USD:-100.00}"
-GATEWAY_PORT="${AI_GATEWAY_PORT:-8080}"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+AI_GATEWAY_REPO="${AI_GATEWAY_REPO:-$HOME/Development/ai-gateway}"
+GATEWAY_URL="${AI_GATEWAY_LOCAL_URL:-http://localhost:8080}"
 
 if [ ! -d "$AI_GATEWAY_REPO" ]; then
     cat >&2 <<EOF
 [start-ai-gateway] No sibling clone at $AI_GATEWAY_REPO.
-
-Either clone it:
   git clone git@github.com:PostHog/ai-gateway.git "$AI_GATEWAY_REPO"
-
-Or skip this entry in mprocs and set AGENT_USE_AI_GATEWAY=false on the
-agent-runner; the runner falls back to direct providers automatically.
-
+Or disable the ai_gateway capability — the runner falls back to direct providers.
 Override the path with AI_GATEWAY_REPO=... if your clone lives elsewhere.
 EOF
     exit 1
 fi
 
-if [ ! -f "$AI_GATEWAY_REPO/.env" ]; then
-    cat >&2 <<EOF
-[start-ai-gateway] $AI_GATEWAY_REPO/.env is missing.
+# Pin the sibling gateway's compose project to its own name — PostHog's dev env
+# exports COMPOSE_PROJECT_NAME=posthog, which would otherwise scope the gateway's
+# containers under the posthog project. Inherited by setup-gateway-e2e and the
+# sibling's `bin/start gateway` below.
+export COMPOSE_PROJECT_NAME=ai-gateway
 
-Create it (copy .env.example) with at minimum provider keys:
-  AI_GATEWAY_ANTHROPIC_API_KEY=sk-ant-...
-  AI_GATEWAY_OPENAI_API_KEY=sk-proj-...
-EOF
+# Provision (deps + resolver mode + phs_ + blob; ledger funding is best-effort
+# until the gateway has booted once). Retry until PostHog's DB/migrations ready.
+provisioned=false
+for i in $(seq 1 10); do
+    if "$REPO_ROOT/bin/setup-gateway-e2e"; then
+        provisioned=true
+        break
+    fi
+    echo "[start-ai-gateway] waiting for PostHog (db/migrations) before provisioning (attempt $i/10)..."
+    sleep 3
+done
+
+# Don't start the gateway without a credential — it would boot in resolver mode
+# and 401 every request with no signal. Fail loud instead.
+if [ "$provisioned" != true ]; then
+    echo "[start-ai-gateway] provisioning failed after 10 attempts (see Django output above) — aborting." >&2
     exit 1
 fi
 
-cd "$AI_GATEWAY_REPO"
-
-# Provider keys (+ any other AI_GATEWAY_* config) from the clone's .env.
-set -o allexport
-# shellcheck disable=SC1091
-source "$AI_GATEWAY_REPO/.env"
-set +o allexport
-
-echo "[start-ai-gateway] bringing up gateway deps (postgres + valkey)"
-docker compose up -d --wait
-
-# Seed the team_id=0 ledger once /readyz passes; migrations create the table
-# on boot. The 5-min budget covers a cold `go run` compile plus catalog warm-up.
+# Once the gateway is listening — it migrates the ledger schema before serving —
+# re-run setup so the topup lands (a no-op once the team is already funded). Runs
+# in the background so it doesn't block the gateway, and survives the exec below.
 (
-    for _ in $(seq 1 150); do
-        if curl -sf "http://localhost:${GATEWAY_PORT}/readyz" >/dev/null 2>&1; then
-            echo "[start-ai-gateway] seeding anonymous-team ledger (team_id=0, +${TOPUP_USD} USD)"
-            if docker compose exec -T postgres psql -U postgres -d ai_gateway -v ON_ERROR_STOP=1 -c \
-                "INSERT INTO ledger_entries (team_id, transaction_type, source, destination, amount_usd) VALUES (0, 'topup', 'funding', 'prepaid', ${TOPUP_USD});" \
-                >/dev/null; then
-                exit 0
-            fi
-            echo "[start-ai-gateway] WARNING: ledger topup failed (see psql error above); open-mode requests will 402 until you seed it." >&2
-            exit 0
+    for _ in $(seq 1 60); do
+        if curl -sf "$GATEWAY_URL/livez" >/dev/null 2>&1; then
+            "$REPO_ROOT/bin/setup-gateway-e2e" >/dev/null 2>&1 || true
+            break
         fi
-        sleep 2
+        sleep 1
     done
-    echo "[start-ai-gateway] WARNING: gateway never became ready after 5 min; SKIPPED ledger topup." >&2
-    echo "[start-ai-gateway] open-mode requests will 402 until you seed it (re-run this entry, or insert a team_id=0 topup)." >&2
 ) &
 
-echo "[start-ai-gateway] running gateway (open mode) on http://localhost:${GATEWAY_PORT}"
-# Force open mode + own valkey/postgres over the clone's .env, STUB flags
-# included (else an offline clone's STUB_DISPATCH=true serves canned output).
-export AI_GATEWAY_AUTH_MODE=open
-export AI_GATEWAY_LISTEN_ADDR=":${GATEWAY_PORT}"
-export AI_GATEWAY_REDIS_URL="redis://localhost:6381/0"
-# nosemgrep: trailofbits.generic.postgres-insecure-sslmode.postgres-insecure-sslmode -- localhost dev postgres, no TLS
-export AI_GATEWAY_POSTGRES_DSN="postgres://postgres:postgres@localhost:5435/ai_gateway?sslmode=disable"
-export AI_GATEWAY_STUB_DISPATCH=false
-export AI_GATEWAY_STUB_PRICING=false
-exec go run ./cmd/gateway
+# Run the gateway on the host. bin/start brings up the sibling deps and runs
+# under air with hot reload; it reads AI_GATEWAY_AUTH_MODE=resolver from the
+# sibling .env that setup-gateway-e2e wrote.
+cd "$AI_GATEWAY_REPO"
+exec bin/start gateway
