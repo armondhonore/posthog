@@ -88,6 +88,8 @@ function buildPipeline(configOverrides: Partial<AiEventSubpipelineConfig> = {}) 
             PERSON_JSONB_SIZE_ESTIMATE_ENABLE: 0,
             PERSON_PROPERTIES_UPDATE_ALL: false,
             FLAG_CALLED_PERSONLESS_DEFAULT_TEAMS: '*',
+            AI_GATEWAY_SIGNING_SECRET: '',
+            AI_GATEWAY_SIGNATURE_MAX_AGE_MS: 0,
         },
         outputs: mockOutputs,
         teamManager: {

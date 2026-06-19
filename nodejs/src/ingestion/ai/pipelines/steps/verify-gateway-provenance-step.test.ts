@@ -11,6 +11,11 @@ const SECRET = 'test-signing-secret'
 const TOKEN = 'phc_test'
 const DISTINCT_ID = 'user-7'
 const MAX_AGE_MS = 5 * 60 * 1000
+// Fixed capture time, deliberately far from the real wall clock: freshness is
+// checked against this (the server-stamped `now` header), not Date.now(), so
+// ingestion lag can't make a real event look stale.
+const CAPTURE_TIME = new Date('2026-05-28T10:00:00.000Z')
+const FRESH_SIGNED_AT = CAPTURE_TIME.toISOString()
 
 // Mirror of ai-gateway internal/emitter/signer.go: HMAC-SHA256 over
 // `token \n distinct_id \n request_id \n signed_at`, lowercase hex.
@@ -24,17 +29,18 @@ function createEvent(properties: Record<string, any>): PluginEvent {
         ip: null,
         site_url: 'http://localhost',
         team_id: 1,
-        now: '2026-05-28T10:00:00Z',
-        timestamp: '2026-05-28T10:00:00Z',
+        now: FRESH_SIGNED_AT,
+        timestamp: FRESH_SIGNED_AT,
         event: '$ai_generation',
         uuid: new UUIDT().toString(),
         properties,
     }
 }
 
-function headers(token: string | undefined = TOKEN): EventHeaders {
+function headers(token: string | undefined, now: Date | undefined): EventHeaders {
     return {
         token,
+        now,
         force_disable_person_processing: false,
         historical_migration: false,
         skip_heatmap_processing: false,
@@ -43,11 +49,12 @@ function headers(token: string | undefined = TOKEN): EventHeaders {
 
 async function run(
     properties: Record<string, any>,
-    opts: { secret?: string; token?: string } = {}
+    opts: { secret?: string; token?: string; now?: Date } = {}
 ): Promise<Record<string, any>> {
     const step = createVerifyGatewayProvenanceStep(opts.secret ?? SECRET, MAX_AGE_MS)
     const normalizedEvent = createEvent(properties)
-    const result = await step({ normalizedEvent, headers: headers(opts.token) })
+    const capturedAt = 'now' in opts ? opts.now : CAPTURE_TIME
+    const result = await step({ normalizedEvent, headers: headers(opts.token ?? TOKEN, capturedAt) })
     if (result.type !== PipelineResultType.OK) {
         throw new Error(`expected OK, got ${result.type}`)
     }
@@ -56,12 +63,11 @@ async function run(
 
 describe('verifyGatewayProvenanceStep', () => {
     it('stamps $ai_gateway_verified and drops artifacts for a valid, fresh signature', async () => {
-        const signedAt = new Date().toISOString()
         const props = await run({
             $ai_gateway: true,
             $ai_gateway_request_id: 'req-123',
-            $ai_gateway_signed_at: signedAt,
-            $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, 'req-123', signedAt),
+            $ai_gateway_signed_at: FRESH_SIGNED_AT,
+            $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, 'req-123', FRESH_SIGNED_AT),
             $ai_model: 'claude',
         })
 
@@ -72,11 +78,10 @@ describe('verifyGatewayProvenanceStep', () => {
     })
 
     it('verifies when request_id is absent (signed over empty string)', async () => {
-        const signedAt = new Date().toISOString()
         const props = await run({
             $ai_gateway: true,
-            $ai_gateway_signed_at: signedAt,
-            $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', signedAt),
+            $ai_gateway_signed_at: FRESH_SIGNED_AT,
+            $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', FRESH_SIGNED_AT),
         })
         expect(props.$ai_gateway_verified).toBe(true)
     })
@@ -84,27 +89,37 @@ describe('verifyGatewayProvenanceStep', () => {
     it.each([
         [
             'an invalid signature',
-            (signedAt: string) => ({
+            {
                 $ai_gateway: true,
-                $ai_gateway_signed_at: signedAt,
+                $ai_gateway_signed_at: FRESH_SIGNED_AT,
                 $ai_gateway_signature: 'deadbeef',
-            }),
+            },
+            CAPTURE_TIME,
         ],
-        ['a missing signature', (signedAt: string) => ({ $ai_gateway: true, $ai_gateway_signed_at: signedAt })],
+        ['a missing signature', { $ai_gateway: true, $ai_gateway_signed_at: FRESH_SIGNED_AT }, CAPTURE_TIME],
         [
-            'a stale signed_at',
-            () => {
-                const old = new Date(Date.now() - MAX_AGE_MS - 1000).toISOString()
+            'a signed_at too far from the capture time',
+            (() => {
+                const old = new Date(CAPTURE_TIME.getTime() - MAX_AGE_MS - 1000).toISOString()
                 return {
                     $ai_gateway: true,
                     $ai_gateway_signed_at: old,
                     $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', old),
                 }
-            },
+            })(),
+            CAPTURE_TIME,
         ],
-    ])('strips the whole $ai_gateway* namespace for %s', async (_name, build) => {
-        const signedAt = new Date().toISOString()
-        const props = await run({ ...build(signedAt), $ai_keep: 'yes' })
+        [
+            'a missing now header',
+            {
+                $ai_gateway: true,
+                $ai_gateway_signed_at: FRESH_SIGNED_AT,
+                $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', FRESH_SIGNED_AT),
+            },
+            undefined,
+        ],
+    ])('strips the whole $ai_gateway* namespace for %s', async (_name, gatewayProps, now) => {
+        const props = await run({ ...gatewayProps, $ai_keep: 'yes' }, { now })
 
         expect(Object.keys(props).some((k) => k.startsWith('$ai_gateway'))).toBe(false)
         expect(props.$ai_gateway_verified).toBeUndefined()
@@ -117,12 +132,11 @@ describe('verifyGatewayProvenanceStep', () => {
     })
 
     it('strips $ai_gateway* when no secret is configured, even with an otherwise-valid signature', async () => {
-        const signedAt = new Date().toISOString()
         const props = await run(
             {
                 $ai_gateway: true,
-                $ai_gateway_signed_at: signedAt,
-                $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', signedAt),
+                $ai_gateway_signed_at: FRESH_SIGNED_AT,
+                $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', FRESH_SIGNED_AT),
             },
             { secret: '' }
         )

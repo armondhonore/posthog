@@ -28,9 +28,10 @@ type VerifyGatewayProvenanceInput = {
 // namespace, so a forged marker never reaches storage or billing.
 //
 // secret is the shared HMAC key (empty disables verification — everything
-// is treated as unverified and stripped). maxAgeMs bounds how old a signed
-// timestamp may be, which is what defends against replaying a captured
-// signature; per-request dedup against the settlement ledger is a
+// is treated as unverified and stripped). maxAgeMs bounds how far signed_at
+// may be from the event's capture time (the server-stamped `now` header, so
+// ingestion lag is irrelevant), which is what defends against replaying a
+// captured signature; per-request dedup against the settlement ledger is a
 // follow-up that closes the within-window replay gap.
 export function createVerifyGatewayProvenanceStep<TInput extends VerifyGatewayProvenanceInput>(
     secret: string,
@@ -47,7 +48,14 @@ export function createVerifyGatewayProvenanceStep<TInput extends VerifyGatewayPr
 
         if (
             secret !== '' &&
-            isTrusted(key, input.headers.token, input.normalizedEvent.distinct_id, properties, maxAgeMs)
+            isTrusted(
+                key,
+                input.headers.token,
+                input.normalizedEvent.distinct_id,
+                input.headers.now,
+                properties,
+                maxAgeMs
+            )
         ) {
             // Drop the verification artifacts and stamp the trusted marker
             // ourselves, overwriting any client-supplied value.
@@ -67,6 +75,7 @@ function isTrusted(
     key: Buffer,
     token: string | undefined,
     distinctId: string,
+    capturedAt: Date | undefined,
     properties: Record<string, any>,
     maxAgeMs: number
 ): boolean {
@@ -76,7 +85,10 @@ function isTrusted(
         return false
     }
     const requestId = typeof properties[REQUEST_ID_PROPERTY] === 'string' ? properties[REQUEST_ID_PROPERTY] : ''
-    return verifySignature(key, token, distinctId, requestId, signedAt, signature) && isFresh(signedAt, maxAgeMs)
+    return (
+        verifySignature(key, token, distinctId, requestId, signedAt, signature) &&
+        isFresh(signedAt, capturedAt, maxAgeMs)
+    )
 }
 
 // verifySignature mirrors the gateway's canonical form byte-for-byte:
@@ -101,11 +113,16 @@ function verifySignature(
     return timingSafeEqual(expectedBuf, actualBuf)
 }
 
-function isFresh(signedAt: string, maxAgeMs: number): boolean {
+function isFresh(signedAt: string, capturedAt: Date | undefined, maxAgeMs: number): boolean {
+    if (!capturedAt) {
+        return false
+    }
     const signedMs = Date.parse(signedAt)
     if (!Number.isFinite(signedMs)) {
         return false
     }
-    // Symmetric window absorbs clock skew in either direction.
-    return Math.abs(Date.now() - signedMs) <= maxAgeMs
+    // Compare against the server-stamped capture time (the `now` header), not
+    // wall-clock now: ingestion lag must never make a real event look stale.
+    // Symmetric window also absorbs the small capture/gateway clock skew.
+    return Math.abs(capturedAt.getTime() - signedMs) <= maxAgeMs
 }
