@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field, create_model, field_validator
 
 from products.replay_vision.backend.models.replay_scanner import ScannerType
 from products.replay_vision.backend.tags import slugify_tag
-from products.replay_vision.backend.temporal.scanners.base import BaseScanner, BaseScannerOutput, Segment
+from products.replay_vision.backend.temporal.scanners.base import (
+    BaseScanner,
+    BaseScannerOutput,
+    Segment,
+    confidence_field,
+)
 
 _MAX_FREEFORM_TAGS = 5
 
@@ -34,7 +39,7 @@ class ClassifierOutput(BaseScannerOutput, frozen=True):
 
 class ClassifierScanner(BaseScanner, frozen=True):
     scanner_type: Literal[ScannerType.CLASSIFIER] = ScannerType.CLASSIFIER
-    prompt_template: ClassVar[str] = "classifier.jinja"
+    core_step_template: ClassVar[str] = "classifier_step.jinja"
     citation_fields: ClassVar[tuple[str, ...]] = ("reasoning",)
     output_cls: ClassVar[type[BaseScannerOutput]] = ClassifierOutput
     tags: list[str] = Field(min_length=1, description="Fixed vocabulary the model picks from.")
@@ -48,7 +53,9 @@ class ClassifierScanner(BaseScanner, frozen=True):
     def llm_response_schema(self) -> type[BaseModel]:
         # Pin the vocabulary as a `Literal` enum and `multi_label=False` as `max_length=1` so Gemini fails invalid tags at parse time.
         tag_literal = typing.Literal[tuple(self.tags)]  # type: ignore[valid-type]
+        # Field order is load-bearing: reasoning first (reason before tagging), confidence last.
         fields: dict[str, Any] = {
+            "reasoning": (str, Field(description="One paragraph grounding the tag choice in concrete moments.")),
             "tags": (
                 list[tag_literal],  # type: ignore[valid-type]
                 Field(
@@ -61,7 +68,6 @@ class ClassifierScanner(BaseScanner, frozen=True):
                     ),
                 ),
             ),
-            "reasoning": (str, Field(description="One paragraph grounding the tag choice in concrete moments.")),
         }
         if self.allow_freeform_tags:
             fields["tags_freeform"] = (
@@ -76,7 +82,8 @@ class ClassifierScanner(BaseScanner, frozen=True):
                     ),
                 ),
             )
-        return create_model("ClassifierLlmResponse", __base__=BaseScannerOutput, **fields)
+        fields["confidence"] = (float, confidence_field())
+        return create_model("ClassifierLlmResponse", **fields)
 
     @cached_property
     def _fixed_vocab_slugs(self) -> frozenset[str]:
