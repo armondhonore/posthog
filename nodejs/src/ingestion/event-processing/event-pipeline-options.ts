@@ -7,4 +7,8 @@ export interface EventPipelineRunnerOptions {
     PERSON_PROPERTIES_UPDATE_ALL: boolean
     /** Teams whose $feature_flag_called events default to personless: '*' for all, '' to disable, or comma-separated team IDs */
     FLAG_CALLED_PERSONLESS_DEFAULT_TEAMS: string
+    /** Shared HMAC key verifying AI-gateway provenance signatures; '' disables verification (all $ai_gateway* stripped). */
+    AI_GATEWAY_SIGNING_SECRET: string
+    /** Max age of a gateway signed_at timestamp before its signature is rejected, in ms. */
+    AI_GATEWAY_SIGNATURE_MAX_AGE_MS: number
 }

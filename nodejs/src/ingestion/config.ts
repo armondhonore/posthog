@@ -166,6 +166,12 @@ export type IngestionConsumerConfig = {
     /** Teams whose $feature_flag_called events default to personless: '*' for all, '' to disable, or comma-separated team IDs */
     FLAG_CALLED_PERSONLESS_DEFAULT_TEAMS: string
 
+    // AI gateway provenance verification
+    /** Shared HMAC key verifying AI-gateway provenance signatures; '' disables verification (all $ai_gateway* stripped). */
+    AI_GATEWAY_SIGNING_SECRET: string
+    /** Max age of a gateway signed_at timestamp before its signature is rejected, in ms. */
+    AI_GATEWAY_SIGNATURE_MAX_AGE_MS: number
+
     // AI event splitting config
     INGESTION_AI_EVENT_SPLITTING_ENABLED: boolean
     /** '*' for all teams, or comma-separated team IDs always routed to ai_events */
@@ -277,6 +283,10 @@ export function getDefaultIngestionConsumerConfig(): IngestionConsumerConfig {
         EVENT_SCHEMA_ENFORCEMENT_ENABLED: true,
         KAFKA_BATCH_START_LOGGING_ENABLED: false,
         FLAG_CALLED_PERSONLESS_DEFAULT_TEAMS: DEFAULT_FLAG_CALLED_PERSONLESS_DEFAULT_TEAMS,
+
+        // AI gateway provenance verification
+        AI_GATEWAY_SIGNING_SECRET: '',
+        AI_GATEWAY_SIGNATURE_MAX_AGE_MS: 5 * 60 * 1000,
 
         // AI event splitting config
         INGESTION_AI_EVENT_SPLITTING_ENABLED: false,
