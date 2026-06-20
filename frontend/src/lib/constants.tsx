@@ -197,7 +197,6 @@ export const FEATURE_FLAGS = {
     BATCH_EXPORTS_POSTHOG_HTTP: 'posthog-http-batch-exports', // owner: #team-batch-exports
     BILLING_SKIP_FORECASTING: 'billing-skip-forecasting', // owner: @zach
     BOX_PLOT_INSIGHT: 'box-plot-insight', // owner: @pauldambra #team-product-analytics
-    METRIC_INSIGHT: 'metric-insight', // owner: @sampennington #team-product-analytics
     CALENDAR_HEATMAP_INSIGHT: 'calendar-heatmap-insight', // owner: @jabahamondes #team-web-analytics
     COOKIELESS_SERVER_HASH_MODE_SETTING: 'cookieless-server-hash-mode-setting', // owner: #team-web-analytics
     EXPERIMENT_INTERVAL_TIMESERIES: 'experiments-interval-timeseries', // owner: @jurajmajerik #team-experiments
@@ -209,6 +208,7 @@ export const FEATURE_FLAGS = {
     IMPROVED_COOKIELESS_MODE: 'improved-cookieless-mode', // owner: #team-web-analytics
     LINEAGE_DEPENDENCY_VIEW: 'lineage-dependency-view', // owner: #team-data-modeling
     MEMBERS_CAN_USE_PERSONAL_API_KEYS: 'members-can-use-personal-api-keys', // owner: @yasen-posthog #team-platform-features
+    METRIC_INSIGHT: 'metric-insight', // owner: @sampennington #team-product-analytics
     PERSONLESS_EVENTS_NOT_SUPPORTED: 'personless-events-not-supported', // owner: #team-analytics-platform
     QUERY_RUNNING_TIME: 'query_running_time', // owner: #team-analytics-platform
     REPLAY_HOGQL_FILTERS: 'replay-hogql-filters', // owner: @pauldambra #team-replay
@@ -324,6 +324,7 @@ export const FEATURE_FLAGS = {
     HEALTH_ASK_AI: 'health-ask-ai', // owner: @jordanm-posthog #team-web-analytics, gates the "Ask PostHog AI" buttons on the Health overview
     HOGQL_INSIGHT_ALERTS: 'hogql-insight-alerts', // owner: @vdekrijger, gates alerts on SQL-backed (HogQL) insights
     IDENTITY_MATCHING: 'identity-matching', // owner: #team-growth
+    INSIGHT_ADD_TO_DASHBOARD_AAB: 'insight-add-to-dashboard-aab', // owner: @pauldambra #team-product-analytics multivariate=control,control_2,test
     INSIGHT_SUBSCRIBE_PROMINENT_BUTTON: 'insight-subscribe-prominent-button', // owner: @mattp #team-analytics-platform multivariate=control,test
     INTER_PROJECT_TRANSFERS: 'inter-project-transfers', // owner: @reecejones #team-platform-features
     JS_SNIPPET_VERSIONING: 'js-snippet-versioning', // owner: #team-client-libraries
@@ -430,7 +431,6 @@ export const FEATURE_FLAGS = {
     PRODUCT_ANALYTICS_FUNNELS_COMPARE: 'product-analytics-funnels-compare', // owner: @thmsobrmlr #team-product-analytics, gates "Compare to previous" toggle on funnel insights
     PRODUCT_ANALYTICS_HIDE_WEEKENDS: 'product-analytics-hide-weekends', // owner: @kliment-slice #team-irl-events
     PRODUCT_ANALYTICS_INSIGHT_HORIZONTAL_CONTROLS: 'insight-horizontal-controls', // owner: #team-product-analytics
-    INSIGHT_ADD_TO_DASHBOARD_AAB: 'insight-add-to-dashboard-aab', // owner: @pauldambra #team-product-analytics multivariate=control,control_2,test
     PRODUCT_ANALYTICS_PATHS_V2: 'paths-v2', // owner: @thmsobrmlr #team-product-analytics
     PRODUCT_ANALYTICS_QUILL_LEGEND: 'product-analytics-quill-legend', // owner: #team-product-analytics, gates the in-chart quill legend replacing the legacy side InsightLegend
     PRODUCT_ANALYTICS_QUILL_SQL_CHARTS: 'product-analytics-quill-sql-charts', // owner: #team-data-tools, gates rendering DataVisualization line/area charts via @posthog/quill-charts
@@ -465,6 +465,7 @@ export const FEATURE_FLAGS = {
     REPLAY_UI_REDESIGN_2026: 'replay-ui-redesign-2026', // owner: #team-replay, New UI layout for replay
     REPLAY_VIDEO_BASED_SUMMARIZATION: 'replay-video-based-summarization', // owner: #team-replay
     REPLAY_VISION: 'replay-vision', // owner: #team-replay
+    REPLAY_VISION_ACTIONS: 'replay-vision-actions', // owner: #team-replay
     REVENUE_ANALYTICS: 'revenue-analytics', // owner: @rafaeelaudibert #team-customer-analytics
     REVENUE_FIELDS_IN_POWER_USERS_TABLE: 'revenue-fields-in-power-users-table', // owner: @arthurdedeus #team-customer-analytics
     SCENE_MENU_BAR: 'scene-menu-bar', // owner: @adamleithp #team-platform-ux, gates the per-scene MenuBar above SceneTitleSection
