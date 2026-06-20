@@ -1,4 +1,5 @@
 from typing import Literal
+from urllib.parse import urlparse
 
 from django.conf import settings
 
@@ -138,3 +139,43 @@ def get_async_anthropic_gateway_client(product: Product = "django", team_id: int
         default_headers=_team_id_header(team_id) if team_id is not None else None,
         http_client=httpx.AsyncClient(trust_env=False),
     )
+
+
+def resolve_ai_gateway_config() -> tuple[str, str] | None:
+    """Return the validated (url, api_key) for the internal Go ai-gateway, or None when unset.
+
+    Raises if only one of AI_GATEWAY_URL / AI_GATEWAY_API_KEY is set, or the URL lacks the
+    ``/v1`` base path (the SDK appends ``/chat/completions``, so the base must carry ``/v1``).
+    """
+    url, api_key = settings.AI_GATEWAY_URL, settings.AI_GATEWAY_API_KEY
+    if not (url or api_key):
+        return None
+    if not (url and api_key):
+        raise ValueError("AI_GATEWAY_URL and AI_GATEWAY_API_KEY must be set together")
+    if not urlparse(url).path.rstrip("/").endswith("/v1"):
+        raise ValueError("AI_GATEWAY_URL must include the OpenAI base path, e.g. https://<host>/v1")
+    return url, api_key
+
+
+def build_openai_client(product: Product) -> OpenAI:
+    """Return a raw OpenAI client routed through the internal Go ai-gateway when configured,
+    else the Python LLM gateway via :func:`get_llm_client`.
+
+    ``product`` names the Python-gateway route used in the fallback; the slugless Go gateway
+    derives the team from its ``phs_`` bearer and ignores it. trust_env=False keeps the
+    in-cluster call off the egress proxy.
+    """
+    gateway = resolve_ai_gateway_config()
+    if gateway:
+        url, api_key = gateway
+        return OpenAI(api_key=api_key, base_url=url, http_client=httpx.Client(trust_env=False))
+    return get_llm_client(product)
+
+
+def build_async_openai_client(product: Product) -> AsyncOpenAI:
+    """Async variant of :func:`build_openai_client`."""
+    gateway = resolve_ai_gateway_config()
+    if gateway:
+        url, api_key = gateway
+        return AsyncOpenAI(api_key=api_key, base_url=url, http_client=httpx.AsyncClient(trust_env=False))
+    return get_async_llm_client(product)

@@ -1,8 +1,12 @@
-"""OpenAI-compatible client for the cluster-labeling agents, routed through the
-ai-gateway when AI_GATEWAY_URL + AI_GATEWAY_API_KEY are set, else direct to OpenAI."""
+"""ChatOpenAI client for the labeling/report agents, routed through the internal
+Go ai-gateway when AI_GATEWAY_URL + AI_GATEWAY_API_KEY are set, else direct to OpenAI.
+
+The raw-SDK builders for summarization live in ``posthog.llm.gateway_client`` (importing
+from this package would pull in the temporal workflow graph and cycle); this module shares
+its ``resolve_ai_gateway_config`` validator.
+"""
 
 import os
-from urllib.parse import urlparse
 
 from django.conf import settings
 
@@ -10,23 +14,21 @@ import httpx
 from langchain_openai import ChatOpenAI
 
 from posthog.cloud_utils import is_cloud
+from posthog.llm.gateway_client import resolve_ai_gateway_config
 
 
 def build_openai_chat_client(model: str, timeout: float) -> ChatOpenAI:
-    """Return a ChatOpenAI client for cluster labeling. Cloud/DEBUG only.
+    """Return a ChatOpenAI client for the labeling/report agents. Cloud/DEBUG only.
 
+    Routes through the internal Go ai-gateway when configured, else direct to OpenAI.
     In gateway mode the ``phs_`` bearer is team-scoped, so no per-team header is needed.
     """
     if not settings.DEBUG and not is_cloud():
         raise Exception("AI features are only available in PostHog Cloud")
 
-    url, api_key = settings.AI_GATEWAY_URL, settings.AI_GATEWAY_API_KEY
-    if url or api_key:
-        if not (url and api_key):
-            raise Exception("AI_GATEWAY_URL and AI_GATEWAY_API_KEY must be set together")
-        # The SDK appends /chat/completions, so base_url must already carry the /v1 path.
-        if not urlparse(url).path.rstrip("/").endswith("/v1"):
-            raise Exception("AI_GATEWAY_URL must include the OpenAI base path, e.g. https://<host>/v1")
+    gateway = resolve_ai_gateway_config()
+    if gateway:
+        url, api_key = gateway
         return ChatOpenAI(
             model=model,
             api_key=api_key,

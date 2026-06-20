@@ -28,7 +28,7 @@ class TestSummarizeWithOpenAI:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = valid_response_json
 
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_response
@@ -49,7 +49,7 @@ class TestSummarizeWithOpenAI:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = None
 
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_response
@@ -63,7 +63,7 @@ class TestSummarizeWithOpenAI:
                 )
 
     def test_api_error_raises_api_exception(self):
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.side_effect = Exception("API Error")
@@ -81,7 +81,7 @@ class TestSummarizeWithOpenAI:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = valid_response_json
 
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_response
@@ -101,7 +101,7 @@ class TestSummarizeWithOpenAI:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = valid_response_json
 
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_response
@@ -122,7 +122,7 @@ class TestSummarizeWithOpenAI:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = valid_response_json
 
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_response
@@ -142,7 +142,7 @@ class TestSummarizeWithOpenAI:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = valid_response_json
 
-        with patch("products.ai_observability.backend.summarization.llm.openai.get_llm_client") as mock_get_client:
+        with patch("products.ai_observability.backend.summarization.llm.openai.build_openai_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.chat.completions.create.return_value = mock_response
