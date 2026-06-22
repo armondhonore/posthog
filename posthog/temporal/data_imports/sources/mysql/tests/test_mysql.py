@@ -955,7 +955,7 @@ class TestConnectTransientRetry:
             assert yielded is conn
 
         assert mock_connect.call_count == 2
-        sleep.assert_called_once_with(1)
+        sleep.assert_called_once_with(2)
 
     def test_does_not_retry_connection_refused(self, mocker):
         sleep = mocker.patch("posthog.temporal.data_imports.sources.mysql.mysql.time.sleep")
