@@ -376,17 +376,7 @@ def _workspace_section_blocks(
 
 
 def _footer_blocks() -> list[dict]:
-    return [
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": "Tip: `@PostHog settings` opens this from any channel.",
-                }
-            ],
-        }
-    ]
+    return []
 
 
 def _row_summary(row: SlackSettings | None) -> str:

@@ -192,7 +192,6 @@ class RulesCommand:
         "project_show",
         "project_set",
         "project_set_workspace",
-        "settings",
     ]
     rule_text: str | None = None
     repository: str | None = None
@@ -653,12 +652,6 @@ def _parse_rules_command(text: str) -> RulesCommand | None:
 
     if re.fullmatch(r"help", cleaned, flags=re.IGNORECASE):
         return RulesCommand(action="help")
-
-    # `@PostHog settings` (alias: `ai settings`) surfaces the App Home tab where
-    # AI preferences live. Posts a deep link rather than opening a modal because
-    # mention events don't carry a `trigger_id`.
-    if re.fullmatch(r"(ai\s+)?settings", cleaned, flags=re.IGNORECASE):
-        return RulesCommand(action="settings")
 
     # Intercept legacy `default repo` verbs so `default repo set org/repo` doesn't
     # fall through into the explicit-repo cascade and spawn a junk task.

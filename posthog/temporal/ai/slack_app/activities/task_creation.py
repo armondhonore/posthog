@@ -164,8 +164,9 @@ def create_posthog_code_task_for_repo_activity(
     # short-circuits to empty when the slack-app-home flag is off, so today's
     # behaviour is preserved for installs that haven't opted into the App
     # Home tab. Field names match `Task.create_and_run` kwargs so we can pass
-    # them through directly.
-    from products.slack_app.backend.services.ai_preferences import resolve_ai_preferences
+    # them through directly. Imported via the slack_app facade so the call
+    # site doesn't reach into `services/` internals.
+    from products.slack_app.backend.facade.ai_preferences import resolve_ai_preferences
 
     ai_prefs = resolve_ai_preferences(integration, slack_user_id)
 
