@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Slack linked · PostHog</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: #f9fafb; color: #111; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0, 0, 0, .06); padding: 32px 40px; max-width: 480px; text-align: center; }
+        .check { font-size: 48px; line-height: 1; }
+        h1 { font-size: 22px; margin: 16px 0 8px; }
+        p { color: #555; line-height: 1.5; }
+        .hint { font-size: 13px; color: #888; margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="check">✅</div>
+        <h1>Linked to {{ slack_team_name }}</h1>
+        <p>Your Slack identity is now bound to your PostHog account ({{ posthog_email }}).</p>
+        <p>You can close this tab and head back to Slack — mention <strong>@PostHog</strong> again and it'll route to you correctly.</p>
+        <p class="hint">Linked the wrong account? Unlink it in PostHog settings → Connected accounts.</p>
+    </div>
+</body>
+</html>

@@ -66,6 +66,12 @@ from products.slack_app.backend.services.slack_user_info import (
     normalize_slack_response,
     persist_slack_user_info,
 )
+from products.slack_app.backend.services.slack_user_link import (
+    build_invite_url,
+    find_linked_posthog_user,
+    link_feature_enabled,
+    post_link_invite_message,
+)
 from products.slack_app.backend.slack_link_unfurl import handle_posthog_link_unfurl
 
 logger = structlog.get_logger(__name__)
@@ -157,7 +163,10 @@ def _clear_pending_repo_picker(*, integration_id: int, channel: str, thread_ts: 
 @dataclass
 class SlackUserContext:
     user: User
-    slack_email: str
+    # `None` on the linked-user path: the OAuth link binds slack_user_id to a
+    # PostHog user without ever consulting Slack's email, so no value is
+    # available. The email-matching path still always populates this.
+    slack_email: str | None
 
 
 @dataclass
@@ -263,6 +272,43 @@ def resolve_slack_user(
 ) -> SlackUserContext | None:
     """Resolve a Slack user to a PostHog user. Posts an ephemeral error message and returns None on failure (unless post_feedback is False)."""
     try:
+        slack_team_id = integration.integration_id
+        link_enabled = link_feature_enabled(integration, slack_team_id)
+
+        # Linked-user path: when the user has bound their Slack identity to a
+        # PostHog account via the OAuth link flow, we resolve directly without
+        # paying for users.info / email matching. Falls through to the email
+        # path on miss so this stays additive — a workspace with no links
+        # behaves exactly like before.
+        if link_enabled:
+            linked_user = find_linked_posthog_user(
+                slack_user_id=slack_user_id,
+                slack_team_id=slack_team_id,
+                candidate_org_ids={integration.team.organization_id},
+            )
+            if linked_user is not None:
+                user_permissions = UserPermissions(user=linked_user, team=integration.team)
+                if user_permissions.current_team.effective_membership_level is None:
+                    logger.warning(
+                        "slack_app_linked_user_no_team_access",
+                        user_id=linked_user.id,
+                        team_id=integration.team_id,
+                        slack_user_id=slack_user_id,
+                    )
+                    if post_feedback:
+                        _post_slack_user_feedback(
+                            slack,
+                            channel,
+                            slack_user_id,
+                            thread_ts,
+                            (
+                                "Sorry, you don't have access to the PostHog project connected to this Slack workspace. "
+                                "Please ask an admin of your PostHog organization to grant you access."
+                            ),
+                        )
+                    return None
+                return SlackUserContext(user=linked_user, slack_email=None)
+
         slack_user_info = get_slack_user_info(slack, integration, slack_user_id)
         slack_email = slack_user_info.get("user", {}).get("profile", {}).get("email")
         if not slack_email:
@@ -317,6 +363,27 @@ def resolve_slack_user(
                     ),
                     prefer_thread_message=True,
                 )
+                # When the link feature is on, follow the matching-failure message
+                # with the OAuth invite button so the user has a one-click recovery
+                # instead of a dead end. Posted as a second ephemeral message so
+                # the surrounding feedback wording stays unchanged when the flag is
+                # off.
+                if link_enabled:
+                    invite_url = build_invite_url(
+                        slack_user_id=slack_user_id,
+                        slack_team_id=slack_team_id,
+                        posthog_team_id=integration.team_id,
+                        channel=channel,
+                        thread_ts=thread_ts,
+                    )
+                    post_link_invite_message(
+                        slack_client=slack.client,
+                        channel=channel,
+                        slack_user_id=slack_user_id,
+                        thread_ts=thread_ts,
+                        slack_email=slack_email,
+                        invite_url=invite_url,
+                    )
             return None
 
         posthog_user = membership.user
@@ -1343,12 +1410,27 @@ def resolve_posthog_user_from_event(
     ``slack_email`` may be passed by callers that already have it (e.g.
     ``resolve_user_and_integrations``) so we don't repeat the cache lookup.
     """
+    org_ids = {c.team.organization_id for c in candidate_integrations}
+    if not org_ids:
+        return None
+
+    # Linked-user path: short-circuit the email match when the user has bound
+    # their Slack identity to a PostHog account. Gated by the per-workspace
+    # feature flag; off by default, so the email path remains the only path
+    # for unenrolled workspaces.
+    slack_team_id = probe_integration.integration_id
+    if link_feature_enabled(probe_integration, slack_team_id):
+        linked_user = find_linked_posthog_user(
+            slack_user_id=slack_user_id,
+            slack_team_id=slack_team_id,
+            candidate_org_ids=org_ids,
+        )
+        if linked_user is not None:
+            return linked_user
+
     if slack_email is None:
         slack_email = get_slack_email_for_user(probe_integration, slack_user_id)
     if not slack_email:
-        return None
-    org_ids = {c.team.organization_id for c in candidate_integrations}
-    if not org_ids:
         return None
     try:
         membership = (
@@ -1418,9 +1500,28 @@ def _post_user_resolution_failure_reply(
     text = user_resolution_failure_reply(failure_reason, slack_email=slack_email)
     if text is None:
         return
-    _post_slack_user_feedback(
-        SlackIntegration(probe), channel, slack_user_id, thread_ts, text, prefer_thread_message=True
-    )
+    slack_client = SlackIntegration(probe)
+    _post_slack_user_feedback(slack_client, channel, slack_user_id, thread_ts, text, prefer_thread_message=True)
+    # Only the email-mismatch failure (`user_not_found`) is recoverable via the
+    # OAuth link — `no_team_access` means the user *is* known but has no project
+    # access, which the link wouldn't change. Gated on the per-workspace flag
+    # so the original feedback message is the only output when the feature is off.
+    if failure_reason == "user_not_found" and link_feature_enabled(probe, probe.integration_id):
+        invite_url = build_invite_url(
+            slack_user_id=slack_user_id,
+            slack_team_id=probe.integration_id,
+            posthog_team_id=probe.team_id,
+            channel=channel,
+            thread_ts=thread_ts,
+        )
+        post_link_invite_message(
+            slack_client=slack_client.client,
+            channel=channel,
+            slack_user_id=slack_user_id,
+            thread_ts=thread_ts,
+            slack_email=slack_email,
+            invite_url=invite_url,
+        )
 
 
 def _start_posthog_code_workflow(

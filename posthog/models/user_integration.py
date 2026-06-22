@@ -35,10 +35,17 @@ class UserIntegration(UUIDModel):
     - `integration_id` holds the GitHub App installation_id
     - `config` holds installation metadata + user identity (login, id)
     - `sensitive_config` holds installation access token + user-to-server tokens
+
+    Contents for Slack (user identity link):
+    - `integration_id` holds the Slack user id (e.g. "U123ABC")
+    - `config` holds {slack_team_id, slack_team_name, slack_email_at_link}
+    - `sensitive_config` is empty — the link flow only needs identity at link time;
+      the user token is discarded immediately after `users.identity` returns.
     """
 
     class IntegrationKind(models.TextChoices):
         GITHUB = "github"
+        SLACK = "slack"
 
     user = models.ForeignKey(
         "posthog.User",
@@ -58,6 +65,12 @@ class UserIntegration(UUIDModel):
     class Meta:
         db_table = "posthog_user_integration"
         unique_together = [("user", "kind", "integration_id")]
+        indexes = [
+            # Hot path on every inbound Slack event: look up the PostHog user
+            # by the Slack user id present on the event. `kind` is a low-cardinality
+            # prefix so the index also stays useful for any future per-kind queries.
+            models.Index(fields=["kind", "integration_id"], name="user_integration_kind_extid"),
+        ]
 
 
 class ReauthorizationRequired(Exception):
@@ -351,4 +364,39 @@ def user_github_integration_from_installation(
                 "sensitive_config": sensitive_config,
             },
         )
+    return integration
+
+
+def user_slack_integration_from_identity(
+    user: "User",
+    *,
+    slack_user_id: str,
+    slack_team_id: str,
+    slack_team_name: str | None,
+    slack_email_at_link: str | None,
+) -> UserIntegration:
+    """Create or refresh a Slack ``UserIntegration`` from a Sign-in-with-Slack identity.
+
+    The Slack user token returned by ``oauth.v2.access`` is intentionally
+    discarded: inbound resolution only ever needs to map ``slack_user_id`` →
+    PostHog user, so we keep ``sensitive_config`` empty rather than carrying a
+    credential we never call. ``slack_email_at_link`` is stored for support
+    diagnostics ("which Slack email did this user link with?") and is not
+    consulted at resolve time.
+    """
+    config: dict[str, Any] = {
+        "slack_team_id": slack_team_id,
+        "slack_team_name": slack_team_name,
+        "slack_email_at_link": slack_email_at_link,
+        "linked_at": int(time.time()),
+    }
+    integration, _created = UserIntegration.objects.update_or_create(
+        user=user,
+        kind=UserIntegration.IntegrationKind.SLACK,
+        integration_id=slack_user_id,
+        defaults={
+            "config": config,
+            "sensitive_config": {},
+        },
+    )
     return integration
