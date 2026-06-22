@@ -11,7 +11,15 @@ from posthog.api.tagged_item import TaggedItemSerializerMixin
 from posthog.exceptions import Conflict
 from posthog.models import OrganizationMembership
 
-from products.customer_analytics.backend.models import Account, CustomerJourney, CustomerProfileConfig
+from products.customer_analytics.backend.models import (
+    DATA_TYPE_BY_DISPLAY_TYPE,
+    Account,
+    CustomerJourney,
+    CustomerProfileConfig,
+    CustomPropertyDefinition,
+    DataType,
+    DisplayType,
+)
 from products.notebooks.backend.models import Notebook
 
 _ACCOUNT_ASSIGNMENT_SCHEMA = {
@@ -309,3 +317,73 @@ class AccountNotebookSerializer(serializers.ModelSerializer):
             "last_modified_at",
             "last_modified_by",
         ]
+
+
+class CustomPropertyDefinitionSerializer(serializers.ModelSerializer):
+    """A team-scoped definition of a custom account property — the attribute side of the model.
+
+    Holds only the property's shape (name, display type, big-number flag). Per-account values are
+    stored separately, so this serializer never reads or writes account values.
+    """
+
+    name = serializers.CharField(
+        max_length=400,
+        help_text="Human-readable name of the custom property. Unique within the team.",
+    )
+    description = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="Optional description of what the property represents.",
+    )
+    display_type = serializers.ChoiceField(
+        choices=[t.value for t in DisplayType],
+        help_text=(
+            "How the property is interpreted and rendered: 'text', 'number', 'currency', "
+            "'percent', 'date', 'datetime', or 'boolean'."
+        ),
+    )
+    is_big_number = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="Abbreviate large numbers (e.g. 10,000 → 10K). Only applies to numeric properties.",
+    )
+
+    class Meta:
+        model = CustomPropertyDefinition
+        fields = [
+            "id",
+            "name",
+            "description",
+            "display_type",
+            "is_big_number",
+            "created_at",
+            "created_by",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "created_by", "updated_at"]
+
+    def validate(self, attrs):
+        display_type = attrs.get("display_type") or getattr(self.instance, "display_type", None)
+        is_big_number = attrs.get("is_big_number")
+        if is_big_number is None:
+            is_big_number = getattr(self.instance, "is_big_number", False)
+
+        if display_type and is_big_number and DATA_TYPE_BY_DISPLAY_TYPE[DisplayType(display_type)] != DataType.NUMERIC:
+            attrs["is_big_number"] = False
+
+        return attrs
+
+    def create(self, validated_data):
+        validated_data["created_by"] = self.context["request"].user
+        validated_data["team_id"] = self.context["team_id"]
+        try:
+            return super().create(validated_data)
+        except IntegrityError:
+            raise Conflict("A custom property with this name already exists for this team.")
+
+    def update(self, instance, validated_data):
+        try:
+            return super().update(instance, validated_data)
+        except IntegrityError:
+            raise Conflict("A custom property with this name already exists for this team.")
