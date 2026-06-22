@@ -112,13 +112,38 @@ class UserGitHubLinkStartResponseSerializer(serializers.Serializer):
     )
 
 
+class UserSlackIntegrationItemSerializer(serializers.Serializer):
+    id = serializers.UUIDField(help_text="PostHog UserIntegration row id.")
+    kind = serializers.CharField(help_text="Integration kind; always `slack` for this API.")
+    slack_user_id = serializers.CharField(help_text="Slack user id this PostHog account is linked to.")
+    slack_team_id = serializers.CharField(help_text="Slack workspace (team) id the link belongs to.")
+    slack_team_name = serializers.CharField(
+        required=False,
+        allow_null=True,
+        help_text="Slack workspace display name as of link time.",
+    )
+    slack_email_at_link = serializers.CharField(
+        required=False,
+        allow_null=True,
+        help_text="Slack email at the time of linking. Stored for support; not consulted at resolve time.",
+    )
+    created_at = serializers.DateTimeField(help_text="When this link was first created.")
+
+
+class UserSlackIntegrationListResponseSerializer(serializers.Serializer):
+    results = UserSlackIntegrationItemSerializer(
+        many=True,
+        help_text="Slack identity links for the authenticated user.",
+    )
+
+
 @extend_schema(extensions={"x-product": "core"})
 class UserIntegrationViewSet(viewsets.GenericViewSet):
     """`/api/users/@me/integrations/` — manage the user's personal GitHub integrations."""
 
     scope_object = "user"
     required_scopes: list[str] | None = None
-    scope_object_read_actions = ["list", "retrieve", "github_repos", "github_branches"]
+    scope_object_read_actions = ["list", "retrieve", "github_repos", "github_branches", "slack_list"]
     scope_object_write_actions = [
         "create",
         "update",
@@ -128,6 +153,7 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
         "github_start",
         "github_destroy",
         "github_repos_refresh",
+        "slack_destroy",
     ]
 
     authentication_classes = [OAuthAccessTokenAuthentication, PersonalAPIKeyAuthentication, SessionAuthentication]
@@ -360,6 +386,42 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
             }
         )
 
+    @extend_schema(
+        summary="List personal Slack identity links",
+        responses={200: UserSlackIntegrationListResponseSerializer},
+    )
+    @action(methods=["GET"], detail=False, url_path="slack")
+    def slack_list(self, request: Request, **_kwargs) -> Response:
+        """List Slack identity links for this user (zero, one, or more — one row per
+        linked Slack workspace). Flag-agnostic by design: pre-existing rows from
+        when the feature was on must remain visible (and unlinkable) after the
+        flag is rolled back."""
+        user = self._get_user()
+        integrations = UserIntegration.objects.filter(user=user, kind=UserIntegration.IntegrationKind.SLACK).order_by(
+            "created_at"
+        )
+        return Response({"results": [_serialize_slack_integration(integration) for integration in integrations]})
+
+    @extend_schema(
+        summary="Unlink a Slack identity",
+        responses={204: OpenApiResponse(description="Slack link removed.")},
+    )
+    @action(methods=["DELETE"], detail=False, url_path=r"slack/(?P<slack_user_id>[^/]+)")
+    def slack_destroy(self, request: Request, slack_user_id: str, **_kwargs) -> Response:
+        """Remove a Slack identity link by Slack user id. Idempotent and
+        flag-agnostic — users must always be able to unlink even after the
+        feature flag is turned off."""
+        user = self._get_user()
+        integration = UserIntegration.objects.filter(
+            user=user,
+            kind=UserIntegration.IntegrationKind.SLACK,
+            integration_id=slack_user_id,
+        ).first()
+        if integration is None:
+            raise exceptions.NotFound("No Slack link found for this Slack user id.")
+        integration.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 def _resolve_team_for_github_start(user: User, request: Request):
     """Resolve which team to use for team-level GitHub install discovery.
@@ -486,5 +548,19 @@ def _serialize_github_integration(
         "repository_selection": integration.config.get("repository_selection"),
         "account": integration.config.get("account"),
         "uses_shared_installation": integration.integration_id in team_integration_installation_ids,
+        "created_at": integration.created_at,
+    }
+
+
+def _serialize_slack_integration(integration: UserIntegration) -> dict[str, Any]:
+    """Build the response payload for a single Slack UserIntegration row."""
+    config = integration.config or {}
+    return {
+        "id": integration.id,
+        "kind": "slack",
+        "slack_user_id": integration.integration_id,
+        "slack_team_id": config.get("slack_team_id"),
+        "slack_team_name": config.get("slack_team_name"),
+        "slack_email_at_link": config.get("slack_email_at_link"),
         "created_at": integration.created_at,
     }

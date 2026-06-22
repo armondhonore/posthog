@@ -1,10 +1,12 @@
-import { actions, connect, events, kea, listeners, path } from 'kea'
+import { actions, connect, events, kea, listeners, path, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
 import { lemonToast } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
+import { FEATURE_FLAGS } from 'lib/constants'
 import { integrationsLogic } from 'lib/integrations/integrationsLogic'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 
 import type { personalIntegrationsLogicType } from './personalIntegrationsLogicType'
 
@@ -14,6 +16,16 @@ export interface PersonalGitHubIntegration {
     repository_selection: string | null
     account: { type: string; name: string } | null
     uses_shared_installation: boolean
+    created_at: string | null
+}
+
+export interface PersonalSlackIntegration {
+    id: string
+    kind: 'slack'
+    slack_user_id: string
+    slack_team_id: string
+    slack_team_name: string | null
+    slack_email_at_link: string | null
     created_at: string | null
 }
 
@@ -56,11 +68,13 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
             integrationsLogic,
             ['loadIntegrations as loadProjectIntegrations', 'loadIntegrationsSuccess as projectIntegrationsLoaded'],
         ],
+        values: [featureFlagLogic, ['featureFlags']],
     })),
 
     actions({
         connectGitHub: true,
         disconnectGitHub: (installationId: string) => ({ installationId }),
+        disconnectSlack: (slackUserId: string) => ({ slackUserId }),
     }),
 
     loaders(() => ({
@@ -75,13 +89,44 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
                 },
             },
         ],
+        slackIntegrations: [
+            [] as PersonalSlackIntegration[],
+            {
+                loadSlackIntegrations: async () => {
+                    const response = await api.get<{ results: PersonalSlackIntegration[] }>(
+                        'api/users/@me/integrations/slack/'
+                    )
+                    return response.results
+                },
+            },
+        ],
     })),
+
+    selectors({
+        // Gating selector for the new section. Read once in the component so the
+        // backend endpoints are still queryable for users who linked before the
+        // flag flipped off — only the *new connect / discoverability* surface
+        // is hidden, not the unlink path.
+        slackLinkEnabled: [
+            (s) => [s.featureFlags],
+            (featureFlags): boolean => !!featureFlags[FEATURE_FLAGS.SLACK_USER_LINK],
+        ],
+    }),
 
     listeners(({ actions }) => ({
         projectIntegrationsLoaded: () => {
             // When a project-level integration is added/removed, the backend may
             // auto-create a user-level integration. Reload to pick it up.
             actions.loadIntegrations()
+        },
+        disconnectSlack: async ({ slackUserId }) => {
+            try {
+                await api.delete(`api/users/@me/integrations/slack/${encodeURIComponent(slackUserId)}/`)
+                lemonToast.success('Unlinked your Slack account')
+                actions.loadSlackIntegrations()
+            } catch {
+                lemonToast.error('Could not unlink your Slack account.')
+            }
         },
         connectGitHub: async () => {
             try {
@@ -109,6 +154,7 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
     events(({ actions }) => ({
         afterMount: () => {
             actions.loadIntegrations()
+            actions.loadSlackIntegrations()
             const params = new URLSearchParams(window.location.search)
 
             // Stash ``connect_from`` so the post-roundtrip success toast can surface a

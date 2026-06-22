@@ -970,3 +970,86 @@ class TestGithubUserFromCode(APIBaseTest):
         self.assertEqual(result.refresh_token, "ghr_user_refresh")
         self.assertEqual(result.access_token_expires_in, 28800)
         self.assertEqual(result.refresh_token_expires_in, 15897600)
+
+
+def _create_slack_user_integration(
+    user: User,
+    *,
+    slack_user_id: str = "U999",
+    slack_team_id: str = "T12345",
+    slack_team_name: str | None = "Test Workspace",
+    slack_email_at_link: str | None = "dev@example.com",
+) -> UserIntegration:
+    return UserIntegration.objects.create(
+        user=user,
+        kind=UserIntegration.IntegrationKind.SLACK,
+        integration_id=slack_user_id,
+        config={
+            "slack_team_id": slack_team_id,
+            "slack_team_name": slack_team_name,
+            "slack_email_at_link": slack_email_at_link,
+            "linked_at": int(time.time()),
+        },
+        sensitive_config={},
+    )
+
+
+class TestUserIntegrationSlackEndpoints(APIBaseTest):
+    def test_slack_list_returns_empty_when_no_links(self):
+        response = self.client.get("/api/users/@me/integrations/slack/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["results"], [])
+
+    def test_slack_list_returns_user_link_with_full_payload(self):
+        _create_slack_user_integration(self.user)
+        response = self.client.get("/api/users/@me/integrations/slack/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.json()["results"]
+        self.assertEqual(len(results), 1)
+        row = results[0]
+        self.assertEqual(row["kind"], "slack")
+        self.assertEqual(row["slack_user_id"], "U999")
+        self.assertEqual(row["slack_team_id"], "T12345")
+        self.assertEqual(row["slack_team_name"], "Test Workspace")
+        self.assertEqual(row["slack_email_at_link"], "dev@example.com")
+
+    def test_slack_list_does_not_include_github_rows(self):
+        _create_user_integration(self.user)
+        _create_slack_user_integration(self.user)
+        response = self.client.get("/api/users/@me/integrations/slack/")
+        results = response.json()["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["kind"], "slack")
+
+    def test_slack_list_scoped_to_requesting_user(self):
+        other = User.objects.create(email="other@example.com", distinct_id="other-1")
+        _create_slack_user_integration(other, slack_user_id="U-OTHER")
+        response = self.client.get("/api/users/@me/integrations/slack/")
+        self.assertEqual(response.json()["results"], [])
+
+    def test_slack_destroy_removes_row(self):
+        _create_slack_user_integration(self.user, slack_user_id="U999")
+        response = self.client.delete("/api/users/@me/integrations/slack/U999/")
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(
+            UserIntegration.objects.filter(
+                user=self.user, kind=UserIntegration.IntegrationKind.SLACK, integration_id="U999"
+            ).exists()
+        )
+
+    def test_slack_destroy_404_when_link_missing(self):
+        response = self.client.delete("/api/users/@me/integrations/slack/U-NOPE/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_slack_destroy_cannot_remove_other_users_link(self):
+        other = User.objects.create(email="other@example.com", distinct_id="other-2")
+        _create_slack_user_integration(other, slack_user_id="U-OTHER")
+        # The requesting user has no row with this slack_user_id, so we get 404,
+        # not 403 — the route refuses to acknowledge another user's rows.
+        response = self.client.delete("/api/users/@me/integrations/slack/U-OTHER/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(
+            UserIntegration.objects.filter(
+                user=other, kind=UserIntegration.IntegrationKind.SLACK, integration_id="U-OTHER"
+            ).exists()
+        )

@@ -1965,9 +1965,9 @@ export const SETTINGS_MAP: SettingSection[] = [
                 id: 'personal-integrations',
                 title: 'Personal integrations',
                 description:
-                    'Your personal GitHub integrations for repo access, code attribution, and pull request authorship. You can connect multiple GitHub accounts or organizations.',
+                    'Your personal GitHub and Slack integrations. GitHub: connect multiple accounts or organizations for repo access and PR authorship. Slack: bind your Slack identity to this PostHog account so mentions route to you even when your Slack email and PostHog email differ.',
                 component: <PersonalIntegrations />,
-                keywords: ['github', 'integration', 'repos', 'identity', 'link', 'code', 'personal'],
+                keywords: ['github', 'slack', 'integration', 'repos', 'identity', 'link', 'code', 'personal'],
             },
         ],
     },

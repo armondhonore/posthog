@@ -6,8 +6,13 @@ import { LemonBanner, LemonButton, LemonDialog, LemonSkeleton } from '@posthog/l
 import { TZLabel } from 'lib/components/TZLabel'
 import { GitHubRepoSummary } from 'lib/integrations/GitHubRepoSummary'
 import { userGithubIntegrationLogic } from 'lib/integrations/userGithubIntegrationLogic'
+import { IconSlack } from 'lib/lemon-ui/icons'
 
-import { personalIntegrationsLogic, PersonalGitHubIntegration } from './personalIntegrationsLogic'
+import {
+    personalIntegrationsLogic,
+    PersonalGitHubIntegration,
+    PersonalSlackIntegration,
+} from './personalIntegrationsLogic'
 
 function GitHubInstallationRow({ integration }: { integration: PersonalGitHubIntegration }): JSX.Element {
     const { disconnectGitHub } = useActions(personalIntegrationsLogic)
@@ -93,8 +98,69 @@ function GitHubInstallationRow({ integration }: { integration: PersonalGitHubInt
     )
 }
 
+function SlackLinkRow({ integration }: { integration: PersonalSlackIntegration }): JSX.Element {
+    const { disconnectSlack } = useActions(personalIntegrationsLogic)
+
+    const handleUnlink = (): void => {
+        LemonDialog.open({
+            title: `Unlink ${integration.slack_team_name || 'this Slack workspace'}?`,
+            description: (
+                <p>
+                    PostHog will go back to matching you by email. If your Slack email doesn't match any PostHog account
+                    in the organization, mentions won't route to you until you link again.
+                </p>
+            ),
+            primaryButton: {
+                children: 'Unlink',
+                status: 'danger',
+                onClick: () => disconnectSlack(integration.slack_user_id),
+            },
+            secondaryButton: { children: 'Cancel' },
+        })
+    }
+
+    return (
+        <div className="flex items-center gap-4 px-4 py-3">
+            <div className="shrink-0">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-surface-secondary text-2xl">
+                    <IconSlack />
+                </div>
+            </div>
+            <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                    <span className="font-semibold">{integration.slack_team_name || 'Slack workspace'}</span>
+                    <span className="text-xs text-muted bg-surface-secondary px-1.5 py-0.5 rounded font-mono">
+                        {integration.slack_user_id}
+                    </span>
+                </div>
+                <div className="mt-0.5 text-xs text-secondary">
+                    {integration.created_at ? (
+                        <>
+                            Linked <TZLabel time={integration.created_at} className="align-baseline" />
+                        </>
+                    ) : (
+                        'Linked'
+                    )}
+                    {integration.slack_email_at_link ? ` · ${integration.slack_email_at_link}` : ''}
+                </div>
+            </div>
+            <div className="flex shrink-0 items-center">
+                <LemonButton
+                    size="small"
+                    type="secondary"
+                    status="danger"
+                    icon={<IconTrash />}
+                    onClick={handleUnlink}
+                    tooltip="Unlink this Slack account"
+                />
+            </div>
+        </div>
+    )
+}
+
 export function PersonalIntegrations(): JSX.Element {
-    const { integrations, integrationsLoading } = useValues(personalIntegrationsLogic)
+    const { integrations, integrationsLoading, slackIntegrations, slackIntegrationsLoading, slackLinkEnabled } =
+        useValues(personalIntegrationsLogic)
     const { connectGitHub } = useActions(personalIntegrationsLogic)
 
     if (integrationsLoading && integrations.length === 0) {
@@ -133,6 +199,28 @@ export function PersonalIntegrations(): JSX.Element {
                     </span>
                 </div>
             </div>
+
+            {slackLinkEnabled && (
+                <div className="divide-y rounded border bg-surface-primary">
+                    {slackIntegrationsLoading && slackIntegrations.length === 0 ? (
+                        <LemonSkeleton className="h-16 w-full" />
+                    ) : slackIntegrations.length === 0 ? (
+                        <div className="px-4 py-6 text-center text-sm text-secondary">
+                            <IconSlack className="text-3xl mb-2 opacity-40" />
+                            <p className="mb-1">No Slack account linked</p>
+                            <p className="text-xs text-muted text-balance">
+                                To link your Slack account, mention <strong>@PostHog</strong> in a Slack channel
+                                connected to PostHog. If your Slack email doesn't match any PostHog account, the bot
+                                will offer a "Link my PostHog account" button — that's the entry point.
+                            </p>
+                        </div>
+                    ) : (
+                        slackIntegrations.map((integration) => (
+                            <SlackLinkRow key={integration.id} integration={integration} />
+                        ))
+                    )}
+                </div>
+            )}
         </div>
     )
 }
