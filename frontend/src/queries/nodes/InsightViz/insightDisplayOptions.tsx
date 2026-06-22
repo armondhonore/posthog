@@ -1,0 +1,466 @@
+import { useActions, useValues } from 'kea'
+import posthog from 'posthog-js'
+import { useDebouncedCallback } from 'use-debounce'
+
+import { IconInfo } from '@posthog/icons'
+import { LemonCheckbox, LemonInput, LemonSwitch, Tooltip } from '@posthog/lemon-ui'
+import { normalizeAxisLabel } from '@posthog/quill-charts'
+
+import { SmoothingFilter } from 'lib/components/SmoothingFilter/SmoothingFilter'
+import { smoothingOptions } from 'lib/components/SmoothingFilter/smoothings'
+import { UnitPicker } from 'lib/components/UnitPicker/UnitPicker'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { LemonMenuItems } from 'lib/lemon-ui/LemonMenu'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { DEFAULT_DECIMAL_PLACES } from 'lib/utils/numbers'
+import { funnelDataLogic } from 'scenes/funnels/funnelDataLogic'
+import { axisLabel } from 'scenes/insights/aggregationAxisFormat'
+import { AxisLabelsFilter } from 'scenes/insights/EditorFilters/AxisLabelsFilter'
+import { HideIncompleteConversionWindowPeriodsFilter } from 'scenes/insights/EditorFilters/HideIncompleteConversionWindowPeriodsFilter'
+import { HideWeekendsFilter } from 'scenes/insights/EditorFilters/HideWeekendsFilter'
+import { LegendPositionFilter } from 'scenes/insights/EditorFilters/LegendPositionFilter'
+import { LifecyclePercentagesFilter } from 'scenes/insights/EditorFilters/LifecyclePercentagesFilter'
+import { LifecycleStackingFilter } from 'scenes/insights/EditorFilters/LifecycleStackingFilter'
+import {
+    MetricColorFilter,
+    MetricShowChangeFilter,
+    MetricSummaryFilter,
+} from 'scenes/insights/EditorFilters/MetricFilters'
+import { PercentStackViewFilter } from 'scenes/insights/EditorFilters/PercentStackViewFilter'
+import { ResultCustomizationByPicker } from 'scenes/insights/EditorFilters/ResultCustomizationByPicker'
+import { ScalePicker } from 'scenes/insights/EditorFilters/ScalePicker'
+import { ShowAlertAnomalyPointsFilter } from 'scenes/insights/EditorFilters/ShowAlertAnomalyPointsFilter'
+import { ShowAlertThresholdLinesFilter } from 'scenes/insights/EditorFilters/ShowAlertThresholdLinesFilter'
+import { ShowAnnotationsFilter } from 'scenes/insights/EditorFilters/ShowAnnotationsFilter'
+import { ShowLegendFilter } from 'scenes/insights/EditorFilters/ShowLegendFilter'
+import { ShowMultipleYAxesFilter } from 'scenes/insights/EditorFilters/ShowMultipleYAxesFilter'
+import { ShowPieTotalFilter } from 'scenes/insights/EditorFilters/ShowPieTotalFilter'
+import { ShowTrendLinesFilter } from 'scenes/insights/EditorFilters/ShowTrendLinesFilter'
+import { StackBreakdownFilter } from 'scenes/insights/EditorFilters/StackBreakdownFilter'
+import { ValueOnSeriesFilter } from 'scenes/insights/EditorFilters/ValueOnSeriesFilter'
+import { RetentionCohortLabelStartIndexPicker } from 'scenes/insights/filters/RetentionCohortLabelStartIndexPicker'
+import { RetentionDashboardDisplayPicker } from 'scenes/insights/filters/RetentionDashboardDisplayPicker'
+import { insightLogic } from 'scenes/insights/insightLogic'
+import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
+import { ConfidenceLevelInput } from 'scenes/insights/views/LineGraph/ConfidenceLevelInput'
+import { MovingAverageIntervalsInput } from 'scenes/insights/views/LineGraph/MovingAverageIntervalsInput'
+import { trendsDataLogic } from 'scenes/trends/trendsDataLogic'
+
+import { hasBreakdownFilter, isTrendsQuery } from '~/queries/utils'
+import { ChartDisplayType } from '~/types'
+
+const LINE_DISPLAYS = [
+    ChartDisplayType.ActionsLineGraph,
+    ChartDisplayType.ActionsLineGraphCumulative,
+    ChartDisplayType.ActionsAreaGraph,
+] as const
+const BAR_DISPLAYS = [
+    ChartDisplayType.ActionsBar,
+    ChartDisplayType.ActionsUnstackedBar,
+    ChartDisplayType.ActionsBarValue,
+] as const
+
+function displayMatches(display: ChartDisplayType | null | undefined, displays: readonly ChartDisplayType[]): boolean {
+    return !!display && displays.includes(display)
+}
+
+function isDefaultTrendsLineDisplay(
+    display: ChartDisplayType | null | undefined,
+    querySource: Parameters<typeof isTrendsQuery>[0]
+): boolean {
+    return !display && isTrendsQuery(querySource)
+}
+
+// The "Options" menu shared between the insight editor's display config bar and the dashboard card
+// ⋯ menu. `count` is the number of non-default active options, badged on the editor's Options button.
+export function useInsightDisplayOptions(): { items: LemonMenuItems; count: number } {
+    const { insightProps } = useValues(insightLogic)
+    const {
+        querySource,
+        isTrends,
+        isRetention,
+        isStickiness,
+        isLifecycle,
+        display,
+        breakdownFilter,
+        trendsFilter,
+        hasLegend,
+        showLegend,
+        supportsValueOnSeries,
+        showPercentStackView,
+        supportsPercentStackView,
+        supportsBarValueStacking,
+        supportsResultCustomizationBy,
+        yAxisScaleType,
+        showMultipleYAxes,
+        showAnnotations,
+        isNonTimeSeriesDisplay,
+        interval,
+    } = useValues(insightVizDataLogic(insightProps))
+    const { updateQuerySource } = useActions(insightVizDataLogic(insightProps))
+    const { isTrendsFunnel } = useValues(funnelDataLogic(insightProps))
+    const {
+        showValuesOnSeries,
+        showPercentagesOnSeries,
+        mightContainFractionalNumbers,
+        showConfidenceIntervals,
+        showMovingAverage,
+    } = useValues(trendsDataLogic(insightProps))
+    const { featureFlags } = useValues(featureFlagLogic)
+    const hideWeekendsEnabled = !!featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_HIDE_WEEKENDS]
+    const quillLegendEnabled = !!featureFlags[FEATURE_FLAGS.PRODUCT_ANALYTICS_QUILL_LEGEND]
+
+    // The slope graph shows the first vs last interval, so it drops the options that need the points
+    // between them (smoothing, multiple axes, alert/annotation overlays, statistical analysis).
+    const isSlopeGraph = display === ChartDisplayType.SlopeGraph
+    const isMetric = display === ChartDisplayType.Metric
+    const hideContinuousChartOptions = isNonTimeSeriesDisplay || isMetric || isSlopeGraph
+    const showSmoothing =
+        isTrends &&
+        !hasBreakdownFilter(breakdownFilter) &&
+        (!display || display === ChartDisplayType.ActionsLineGraph || display === ChartDisplayType.ActionsAreaGraph) &&
+        !!interval &&
+        (smoothingOptions[interval]?.length ?? 0) > 0
+    const showMultipleYAxesConfig = (isTrends || isStickiness) && !hideContinuousChartOptions
+    const showAlertThresholdLinesConfig = isTrends && !hideContinuousChartOptions
+    const showAnnotationsConfig = (isTrends && !hideContinuousChartOptions) || isTrendsFunnel
+    const isLineDisplay = isDefaultTrendsLineDisplay(display, querySource) || displayMatches(display, LINE_DISPLAYS)
+    const isBarDisplay = displayMatches(display, BAR_DISPLAYS)
+    const isCumulativeLineDisplay = display === ChartDisplayType.ActionsLineGraphCumulative
+    const showAxisLabelsConfig = isTrends && (isLineDisplay || isBarDisplay)
+    const showFunnelLegendConfig = isTrendsFunnel && hasBreakdownFilter(breakdownFilter)
+    const isLineGraph = isLineDisplay && !isCumulativeLineDisplay
+    const isLinearScale = !yAxisScaleType || yAxisScaleType === 'linear'
+    const isBoxPlot = display === ChartDisplayType.BoxPlot
+
+    const items: LemonMenuItems = [
+        ...(showSmoothing
+            ? [
+                  {
+                      title: 'Smoothing',
+                      items: [
+                          {
+                              label: () => (
+                                  <div className="px-2 pb-1.5 w-full">
+                                      <SmoothingFilter />
+                                  </div>
+                              ),
+                          },
+                      ],
+                  },
+              ]
+            : []),
+        ...((isTrends && display !== ChartDisplayType.CalendarHeatmap) ||
+        isRetention ||
+        isTrendsFunnel ||
+        isStickiness ||
+        isLifecycle
+            ? [
+                  {
+                      title: (
+                          <h5 className="mx-2 my-1" data-attr="options-display-section">
+                              Display
+                          </h5>
+                      ),
+                      items: isBoxPlot
+                          ? [
+                                ...(hasLegend ? [{ label: () => <ShowLegendFilter /> }] : []),
+                                {
+                                    label: () => (
+                                        <LemonCheckbox
+                                            label={
+                                                <span className="font-normal">
+                                                    Exclude outliers{' '}
+                                                    <Tooltip title="When enabled, whiskers are clipped to 1.5x the interquartile range, making it easier to see differences between the quartiles. When disabled, the y-axis extends to show the full range including extreme values.">
+                                                        <IconInfo className="relative top-0.5 text-lg text-secondary" />
+                                                    </Tooltip>
+                                                </span>
+                                            }
+                                            className="p-1 px-2"
+                                            size="small"
+                                            checked={trendsFilter?.excludeBoxPlotOutliers !== false}
+                                            onChange={(checked) => {
+                                                if (isTrendsQuery(querySource)) {
+                                                    const newQuery = { ...querySource }
+                                                    newQuery.trendsFilter = {
+                                                        ...trendsFilter,
+                                                        excludeBoxPlotOutliers: checked,
+                                                    }
+                                                    updateQuerySource(newQuery)
+                                                }
+                                            }}
+                                        />
+                                    ),
+                                },
+                            ]
+                          : isSlopeGraph
+                            ? // A slope only shows the first vs last interval of each series — the
+                              // legend (when there are multiple series) is the only display option that applies.
+                              hasLegend
+                                ? [{ label: () => <ShowLegendFilter /> }]
+                                : []
+                            : [
+                                  ...(isMetric
+                                      ? [
+                                            { label: () => <MetricSummaryFilter /> },
+                                            { label: () => <MetricShowChangeFilter /> },
+                                            { label: () => <MetricColorFilter /> },
+                                        ]
+                                      : []),
+                                  ...(isLifecycle ? [{ label: () => <LifecycleStackingFilter /> }] : []),
+                                  ...(supportsValueOnSeries ? [{ label: () => <ValueOnSeriesFilter /> }] : []),
+                                  ...(isLifecycle ? [{ label: () => <LifecyclePercentagesFilter /> }] : []),
+                                  ...(supportsPercentStackView
+                                      ? [
+                                            {
+                                                label: () => (
+                                                    <PercentStackViewFilter
+                                                        // On a pie chart the percentage is rendered through the
+                                                        // series value labels, so it has no effect while those
+                                                        // labels are hidden.
+                                                        disabledReason={
+                                                            display === ChartDisplayType.ActionsPie &&
+                                                            showValuesOnSeries === false
+                                                                ? "Enable 'Show values on series' to use this option"
+                                                                : undefined
+                                                        }
+                                                    />
+                                                ),
+                                            },
+                                        ]
+                                      : []),
+                                  ...(supportsBarValueStacking ? [{ label: () => <StackBreakdownFilter /> }] : []),
+                                  ...(hasLegend || showFunnelLegendConfig
+                                      ? [{ label: () => <ShowLegendFilter /> }]
+                                      : []),
+                                  // The in-chart quill legend supports placement; the legacy side
+                                  // legend doesn't, so only offer it for trends line/area/cumulative.
+                                  ...(quillLegendEnabled && isTrends && isLineDisplay && showLegend
+                                      ? [{ label: () => <LegendPositionFilter /> }]
+                                      : []),
+                                  ...(display === ChartDisplayType.ActionsPie
+                                      ? [{ label: () => <ShowPieTotalFilter /> }]
+                                      : []),
+                                  ...(showAlertThresholdLinesConfig
+                                      ? [
+                                            { label: () => <ShowAlertThresholdLinesFilter /> },
+                                            { label: () => <ShowAlertAnomalyPointsFilter /> },
+                                        ]
+                                      : []),
+                                  ...(showMultipleYAxesConfig ? [{ label: () => <ShowMultipleYAxesFilter /> }] : []),
+                                  ...((isTrends || isRetention || isTrendsFunnel) && !hideContinuousChartOptions
+                                      ? [{ label: () => <ShowTrendLinesFilter /> }]
+                                      : []),
+                                  ...(isTrendsFunnel && !hideContinuousChartOptions
+                                      ? [{ label: () => <HideIncompleteConversionWindowPeriodsFilter /> }]
+                                      : []),
+                                  ...(isTrends && !hideContinuousChartOptions && hideWeekendsEnabled
+                                      ? [{ label: () => <HideWeekendsFilter /> }]
+                                      : []),
+                                  ...(showAnnotationsConfig ? [{ label: () => <ShowAnnotationsFilter /> }] : []),
+                              ],
+                  },
+              ]
+            : []),
+        ...(supportsResultCustomizationBy
+            ? [
+                  {
+                      title: (
+                          <>
+                              <h5 className="mx-2 my-1">
+                                  Color customization by{' '}
+                                  <Tooltip title="You can customize the appearance of individual results in your insights. This can be done based on the result's name (e.g., customize the breakdown value 'pizza' for the first series) or based on the result's rank (e.g., customize the first dataset in the results).">
+                                      <IconInfo className="relative top-0.5 text-lg text-secondary" />
+                                  </Tooltip>
+                              </h5>
+                          </>
+                      ),
+                      items: [{ label: () => <ResultCustomizationByPicker /> }],
+                  },
+              ]
+            : []),
+        ...(!showPercentStackView && isTrends && display !== ChartDisplayType.CalendarHeatmap
+            ? [
+                  {
+                      title: axisLabel(display || ChartDisplayType.ActionsLineGraph),
+                      items: [{ label: () => <UnitPicker /> }],
+                  },
+              ]
+            : []),
+        ...(!hideContinuousChartOptions && isTrends && display !== ChartDisplayType.CalendarHeatmap
+            ? [
+                  {
+                      title: 'Y-axis scale',
+                      items: [{ label: () => <ScalePicker /> }],
+                  },
+                  ...(display === ChartDisplayType.BoxPlot
+                      ? []
+                      : [
+                            {
+                                title: 'Statistical analysis',
+                                items: [
+                                    {
+                                        label: () => (
+                                            <LemonSwitch
+                                                label="Show confidence intervals"
+                                                className="pb-2"
+                                                fullWidth
+                                                checked={showConfidenceIntervals}
+                                                disabledReason={
+                                                    !isLineGraph
+                                                        ? 'Confidence intervals are only available for line graphs'
+                                                        : !isLinearScale
+                                                          ? 'Confidence intervals are only supported for linear scale.'
+                                                          : undefined
+                                                }
+                                                onChange={(checked) => {
+                                                    if (isTrendsQuery(querySource)) {
+                                                        const newQuery = { ...querySource }
+                                                        newQuery.trendsFilter = {
+                                                            ...trendsFilter,
+                                                            showConfidenceIntervals: checked,
+                                                        }
+                                                        updateQuerySource(newQuery)
+                                                    }
+                                                }}
+                                            />
+                                        ),
+                                    },
+                                    ...(showConfidenceIntervals
+                                        ? [
+                                              {
+                                                  label: () => <ConfidenceLevelInput />,
+                                              },
+                                          ]
+                                        : []),
+                                    {
+                                        label: () => (
+                                            <LemonSwitch
+                                                label="Show moving average"
+                                                className="pb-2"
+                                                fullWidth
+                                                checked={showMovingAverage}
+                                                disabledReason={
+                                                    !isLineGraph
+                                                        ? 'Moving average is only available for line and area graphs'
+                                                        : !isLinearScale
+                                                          ? 'Moving average is only supported for linear scale.'
+                                                          : undefined
+                                                }
+                                                onChange={(checked) => {
+                                                    if (isTrendsQuery(querySource)) {
+                                                        const newQuery = { ...querySource }
+                                                        newQuery.trendsFilter = {
+                                                            ...trendsFilter,
+                                                            showMovingAverage: checked,
+                                                        }
+                                                        updateQuerySource(newQuery)
+                                                    }
+                                                }}
+                                            />
+                                        ),
+                                    },
+                                    ...(showMovingAverage
+                                        ? [
+                                              {
+                                                  label: () => <MovingAverageIntervalsInput />,
+                                              },
+                                          ]
+                                        : []),
+                                ],
+                            },
+                        ]),
+              ]
+            : []),
+        ...(showAxisLabelsConfig
+            ? [
+                  {
+                      title: 'Axis labels',
+                      items: [{ label: () => <AxisLabelsFilter /> }],
+                  },
+              ]
+            : []),
+        ...(mightContainFractionalNumbers && isTrends && display !== ChartDisplayType.CalendarHeatmap
+            ? [
+                  {
+                      title: 'Decimal places',
+                      items: [{ label: () => <DecimalPrecisionInput /> }],
+                  },
+              ]
+            : []),
+        ...(isRetention
+            ? [
+                  {
+                      title: 'On dashboards',
+                      items: [{ label: () => <RetentionDashboardDisplayPicker /> }],
+                  },
+                  {
+                      title: (
+                          <h5 className="mx-2 my-1">
+                              Cohort labels start at{' '}
+                              <Tooltip title="Controls the starting index used to label cohort columns. Display only, does not affect the calculations.">
+                                  <IconInfo className="relative top-0.5 text-lg text-secondary" />
+                              </Tooltip>
+                          </h5>
+                      ),
+                      items: [{ label: () => <RetentionCohortLabelStartIndexPicker /> }],
+                  },
+              ]
+            : []),
+    ]
+
+    const count: number =
+        (showSmoothing && (trendsFilter?.smoothingIntervals ?? 1) !== 1 ? 1 : 0) +
+        (supportsValueOnSeries && showValuesOnSeries ? 1 : 0) +
+        (isLifecycle && showPercentagesOnSeries ? 1 : 0) +
+        (showPercentStackView ? 1 : 0) +
+        (!showPercentStackView &&
+        isTrends &&
+        trendsFilter?.aggregationAxisFormat &&
+        trendsFilter.aggregationAxisFormat !== 'numeric'
+            ? 1
+            : 0) +
+        ((hasLegend || showFunnelLegendConfig) && showLegend ? 1 : 0) +
+        (!!yAxisScaleType && yAxisScaleType !== 'linear' ? 1 : 0) +
+        (showAxisLabelsConfig && normalizeAxisLabel(trendsFilter?.xAxisLabel) ? 1 : 0) +
+        (showAxisLabelsConfig && normalizeAxisLabel(trendsFilter?.yAxisLabel) ? 1 : 0) +
+        (showMultipleYAxes ? 1 : 0) +
+        (trendsFilter?.hideWeekends && hideWeekendsEnabled ? 1 : 0) +
+        (showAnnotationsConfig && showAnnotations === false ? 1 : 0) +
+        (isMetric && trendsFilter?.metricShowChange === false ? 1 : 0) +
+        (isMetric && trendsFilter?.metricColorByDirection ? 1 : 0) +
+        (isMetric && !!trendsFilter?.metricSummary && trendsFilter.metricSummary !== 'total' ? 1 : 0)
+
+    return { items, count }
+}
+
+function DecimalPrecisionInput(): JSX.Element {
+    const { insightProps } = useValues(insightLogic)
+    const { trendsFilter } = useValues(insightVizDataLogic(insightProps))
+    const { updateInsightFilter } = useActions(insightVizDataLogic(insightProps))
+
+    const reportChange = useDebouncedCallback(() => {
+        posthog.capture('decimal places changed', {
+            decimal_places: trendsFilter?.decimalPlaces,
+        })
+    }, 500)
+
+    return (
+        <LemonInput
+            type="number"
+            size="small"
+            step={1}
+            min={0}
+            max={9}
+            defaultValue={DEFAULT_DECIMAL_PLACES}
+            value={trendsFilter?.decimalPlaces}
+            onChange={(value) => {
+                updateInsightFilter({
+                    decimalPlaces: value,
+                })
+                reportChange()
+            }}
+            className="mx-2 mb-1.5"
+        />
+    )
+}
