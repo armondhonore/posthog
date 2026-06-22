@@ -93,6 +93,16 @@ class SlackSettings(UUIDModel):
     )
     slack_workspace_id = models.CharField(max_length=64)
     slack_user_id = models.CharField(max_length=64, null=True, blank=True)
+    # AI preferences feeding into task-run sandboxes. (runtime_adapter, model)
+    # move as an atomic pair — naming and semantics mirror the task-run request
+    # serializer in products/tasks/backend/presentation/serializers.py so the
+    # resolver can hand these straight to the task layer with no translation.
+    # Validation of the (runtime_adapter, model, reasoning_effort) triple lives
+    # in the AI preferences service to keep heavy task-layer imports off the
+    # Django app-load path.
+    ai_runtime_adapter = models.CharField(max_length=32, null=True, blank=True)
+    ai_model = models.CharField(max_length=128, null=True, blank=True)
+    ai_reasoning_effort = models.CharField(max_length=16, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
