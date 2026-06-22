@@ -65,9 +65,11 @@ describe('performWideEventsQueryInTwoPhases', () => {
 
             const result = await performWideEventsQueryInTwoPhases(intent)
 
+            // 3 pre-stage phase-1 scans, then the phase-2 hydration for the -24h hit (whose `after`
+            // is a computed timestamp range, not the window — so we only assert the scan windows).
             expect(mockedPerformQuery).toHaveBeenCalledTimes(4)
             const afters = mockedPerformQuery.mock.calls.map((c) => (c[0] as EventsQuery).after)
-            expect(afters).toEqual(['-1h', '-6h', '-24h', '-24h'])
+            expect(afters.slice(0, 3)).toEqual(['-1h', '-6h', '-24h'])
             expect((result.results as unknown[])[0]).toEqual(['hydrated-day'])
         })
 
@@ -86,9 +88,11 @@ describe('performWideEventsQueryInTwoPhases', () => {
 
             const result = await performWideEventsQueryInTwoPhases(intent)
 
+            // 3 empty pre-stage scans, the -7d main scan, then the -7d phase-2 hydration (whose
+            // `after` is a computed timestamp range, not the window — so we drop it from the check).
             expect(mockedPerformQuery).toHaveBeenCalledTimes(5)
             const afters = mockedPerformQuery.mock.calls.map((c) => (c[0] as EventsQuery).after)
-            expect(afters).toEqual(['-1h', '-6h', '-24h', '-7d', '-7d'])
+            expect(afters.slice(0, 4)).toEqual(['-1h', '-6h', '-24h', '-7d'])
             expect((result.results as unknown[])[0]).toEqual(['hydrated-week'])
         })
 
