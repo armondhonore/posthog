@@ -13,7 +13,6 @@ first imported.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 from types import ModuleType
 
 import pytest
@@ -42,59 +41,53 @@ from products.slack_app.backend.services.slack_app_home import (
 @pytest.fixture(autouse=True)
 def _stub_picker_facade():
     """Stub `tasks.facade.run_config` so renderer tests don't trigger the
-    tasks-temporal import chain (same test-env quirk as the resolver tests)."""
+    tasks-temporal import chain (same test-env quirk as the resolver tests).
 
-    @dataclass(frozen=True)
-    class _PickerEffort:
-        value: str
-        label: str
+    Only the structural helpers `get_picker_choices()` consumes are stubbed —
+    the picker dataclasses and display labels themselves live in
+    `slack_app_home.py` so they don't need stubbing.
+    """
 
-    @dataclass(frozen=True)
-    class _PickerModel:
-        value: str
-        label: str
-        supported_efforts: tuple = ()
+    class _Effort:
+        def __init__(self, value):
+            self.value = value
 
-    @dataclass(frozen=True)
-    class _PickerAdapter:
-        value: str
-        label: str
-        models: tuple = ()
+    class _Adapter:
+        def __init__(self, value):
+            self.value = value
+
+    class _RuntimeAdapter:
+        CLAUDE = _Adapter("claude")
+        CODEX = _Adapter("codex")
+
+        def __iter__(self):
+            return iter([self.CLAUDE, self.CODEX])
+
+    models_by_adapter = {
+        "claude": ("claude-opus-4-7", "claude-sonnet-4-6"),
+        "codex": ("gpt-5", "gpt-5.5"),
+    }
+    supported_by_model = {
+        ("claude", "claude-opus-4-7"): ("low", "medium", "high", "xhigh", "max"),
+        ("claude", "claude-sonnet-4-6"): ("low", "medium", "high"),
+        ("codex", "gpt-5"): ("low", "medium", "high"),
+        ("codex", "gpt-5.5"): ("low", "medium", "high", "xhigh"),
+    }
+
+    def fake_get_models(adapter):
+        adapter_value = adapter.value if hasattr(adapter, "value") else adapter
+        return models_by_adapter.get(adapter_value, ())
+
+    def fake_get_supported(adapter, model):
+        adapter_value = adapter.value if hasattr(adapter, "value") else adapter
+        return tuple(_Effort(v) for v in supported_by_model.get((adapter_value, model), ()))
 
     module_name = "products.tasks.backend.facade.run_config"
     fake = ModuleType(module_name)
-    fake.RUNTIME_ADAPTER_DISPLAY_NAMES = {"claude": "Claude (Anthropic)", "codex": "Codex (OpenAI)"}
-    fake.MODEL_DISPLAY_NAMES = {
-        "claude-opus-4-7": "Claude Opus 4.7",
-        "claude-sonnet-4-6": "Claude Sonnet 4.6",
-        "gpt-5": "GPT-5",
-        "gpt-5.5": "GPT-5.5",
-    }
-    fake.REASONING_EFFORT_DISPLAY_NAMES = {
-        "low": "Low",
-        "medium": "Medium",
-        "high": "High",
-        "xhigh": "Extra high",
-        "max": "Max",
-    }
-    fake.get_picker_choices = lambda: (
-        _PickerAdapter(
-            value="claude",
-            label="Claude (Anthropic)",
-            models=(
-                _PickerModel(value="claude-opus-4-7", label="Claude Opus 4.7"),
-                _PickerModel(value="claude-sonnet-4-6", label="Claude Sonnet 4.6"),
-            ),
-        ),
-        _PickerAdapter(
-            value="codex",
-            label="Codex (OpenAI)",
-            models=(
-                _PickerModel(value="gpt-5", label="GPT-5"),
-                _PickerModel(value="gpt-5.5", label="GPT-5.5"),
-            ),
-        ),
-    )
+    fake.RuntimeAdapter = _RuntimeAdapter()
+    fake.get_models_for_runtime_adapter = fake_get_models
+    fake.get_supported_reasoning_efforts = fake_get_supported
+
     saved = sys.modules.get(module_name)
     sys.modules[module_name] = fake
     try:

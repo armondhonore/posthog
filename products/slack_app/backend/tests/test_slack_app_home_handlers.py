@@ -132,62 +132,20 @@ def _stub_task_runtime_helpers():
 
     import sys
 
+    def fake_get_models(adapter):
+        adapter_value = adapter.value if hasattr(adapter, "value") else adapter
+        if adapter_value == "claude":
+            return ("claude-opus-4-7", "claude-sonnet-4-6")
+        if adapter_value == "codex":
+            return ("gpt-5.5",)
+        return ()
+
     fake = ModuleType("products.tasks.backend.facade.run_config")
     fake.get_supported_reasoning_efforts = fake_get_supported
     fake.get_reasoning_effort_error = fake_get_error
+    fake.get_models_for_runtime_adapter = fake_get_models
     fake.PUBLIC_REASONING_EFFORTS = public_efforts
     fake.RuntimeAdapter = _RuntimeAdapter()
-    # `slack_app_home.py` consumes adapter and model display labels + the
-    # picker tree from the facade. Provide minimal stubs so renderer code
-    # paths exercised by the handler tests still work.
-    fake.RUNTIME_ADAPTER_DISPLAY_NAMES = {"claude": "Claude (Anthropic)", "codex": "Codex (OpenAI)"}
-    fake.MODEL_DISPLAY_NAMES = {
-        "claude-opus-4-7": "Claude Opus 4.7",
-        "claude-sonnet-4-6": "Claude Sonnet 4.6",
-        "gpt-5.5": "GPT-5.5",
-    }
-    fake.REASONING_EFFORT_DISPLAY_NAMES = {
-        "low": "Low",
-        "medium": "Medium",
-        "high": "High",
-        "xhigh": "Extra high",
-        "max": "Max",
-    }
-
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class _PickerEffort:
-        value: str
-        label: str
-
-    @dataclass(frozen=True)
-    class _PickerModel:
-        value: str
-        label: str
-        supported_efforts: tuple = ()
-
-    @dataclass(frozen=True)
-    class _PickerAdapter:
-        value: str
-        label: str
-        models: tuple = ()
-
-    fake.get_picker_choices = lambda: (
-        _PickerAdapter(
-            value="claude",
-            label="Claude (Anthropic)",
-            models=(
-                _PickerModel(value="claude-opus-4-7", label="Claude Opus 4.7"),
-                _PickerModel(value="claude-sonnet-4-6", label="Claude Sonnet 4.6"),
-            ),
-        ),
-        _PickerAdapter(
-            value="codex",
-            label="Codex (OpenAI)",
-            models=(_PickerModel(value="gpt-5.5", label="GPT-5.5"),),
-        ),
-    )
 
     saved = sys.modules.get(fake.__name__)
     sys.modules[fake.__name__] = fake

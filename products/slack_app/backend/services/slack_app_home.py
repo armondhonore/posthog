@@ -46,50 +46,126 @@ MODAL_BLOCK_REASONING_EFFORT = "block_reasoning_effort"
 EditScope = Literal["personal", "workspace"]
 
 
-# Picker data (adapters, model lists, display labels) all comes from the tasks
-# product via `products.tasks.backend.facade.run_config`. The imports are
-# deferred to call time on purpose — at module load the slack_app api.py is
-# imported by Django startup, and the facade module pulls
-# `tasks.backend.temporal.process_task.utils` which transitively loads the
-# tasks temporal package. In production that's fine; in tests the env config
-# rejects it, and the resolver/handler tests already stub the underlying
-# module. Lazy imports keep the slack_app side honest about what it actually
-# needs at module-load time (nothing from the tasks runtime).
+# Display labels for the picker UI. These are Slack-app concerns — the tasks
+# product owns the structural truth (which runtimes/models/efforts exist) but
+# how they're spelled in this surface stays here. If another surface (web
+# settings page, Linear app, etc.) needs labels, it owns its own copy rather
+# than reaching across products for UI strings.
+RUNTIME_ADAPTER_DISPLAY_NAMES: dict[str, str] = {
+    "claude": "Claude (Anthropic)",
+    "codex": "Codex (OpenAI)",
+}
+
+MODEL_DISPLAY_NAMES: dict[str, str] = {
+    "claude-opus-4-5": "Claude Opus 4.5",
+    "claude-opus-4-6": "Claude Opus 4.6",
+    "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-opus-4-8": "Claude Opus 4.8",
+    "claude-fable-5": "Claude Fable 5",
+    "claude-sonnet-4-6": "Claude Sonnet 4.6",
+    "gpt-5": "GPT-5",
+    "gpt-5.5": "GPT-5.5",
+}
+
+REASONING_EFFORT_DISPLAY_NAMES: dict[str, str] = {
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra high",
+    "max": "Max",
+}
 
 
-def _picker_choices() -> tuple[Any, ...]:
-    from products.tasks.backend.facade.run_config import get_picker_choices
+@dataclass(frozen=True)
+class PickerEffort:
+    """A single reasoning effort choice surfaced in the AI preferences modal."""
 
-    return get_picker_choices()
+    value: str
+    label: str
+
+
+@dataclass(frozen=True)
+class PickerModel:
+    """A single model choice grouped under its runtime adapter."""
+
+    value: str
+    label: str
+    supported_efforts: tuple[PickerEffort, ...]
+
+
+@dataclass(frozen=True)
+class PickerAdapter:
+    """A single runtime adapter exposed to the picker, with its models."""
+
+    value: str
+    label: str
+    models: tuple[PickerModel, ...]
+
+
+def get_picker_choices() -> tuple[PickerAdapter, ...]:
+    """Build the picker tree from the tasks facade's structural data.
+
+    The tasks product owns the source of truth — which runtime adapters exist,
+    which model identifiers each runs, and which reasoning efforts each model
+    supports. This function adds the Slack-app UI labels and packages the
+    result into picker-shaped dataclasses for the renderer.
+
+    Display labels fall back to the raw identifier when a new model or adapter
+    ships in the tasks runtime without a matching label here, so unknown
+    values surface rather than silently disappearing.
+    """
+    from products.tasks.backend.facade.run_config import (
+        RuntimeAdapter,
+        get_models_for_runtime_adapter,
+        get_supported_reasoning_efforts,
+    )
+
+    adapters: list[PickerAdapter] = []
+    for adapter in RuntimeAdapter:
+        models: list[PickerModel] = []
+        for model in get_models_for_runtime_adapter(adapter):
+            efforts = tuple(
+                PickerEffort(value=e.value, label=REASONING_EFFORT_DISPLAY_NAMES.get(e.value) or e.value)
+                for e in get_supported_reasoning_efforts(adapter, model)
+            )
+            models.append(
+                PickerModel(
+                    value=model,
+                    label=MODEL_DISPLAY_NAMES.get(model) or model,
+                    supported_efforts=efforts,
+                )
+            )
+        adapters.append(
+            PickerAdapter(
+                value=adapter.value,
+                label=RUNTIME_ADAPTER_DISPLAY_NAMES.get(adapter.value) or adapter.value,
+                models=tuple(models),
+            )
+        )
+    return tuple(adapters)
 
 
 def _runtime_adapter_label(value: str | None) -> str:
     if not value:
         return "—"
-    from products.tasks.backend.facade.run_config import RUNTIME_ADAPTER_DISPLAY_NAMES
-
     return RUNTIME_ADAPTER_DISPLAY_NAMES.get(value, value)
 
 
 def _reasoning_effort_label(value: str | None) -> str:
     if not value:
         return "—"
-    from products.tasks.backend.facade.run_config import REASONING_EFFORT_DISPLAY_NAMES
-
     return REASONING_EFFORT_DISPLAY_NAMES.get(value, value)
 
 
 def _model_label_lookup(model: str | None) -> str:
     if not model:
         return "—"
-    from products.tasks.backend.facade.run_config import MODEL_DISPLAY_NAMES
-
     return MODEL_DISPLAY_NAMES.get(model, model)
 
 
 def _models_for(runtime_adapter: str) -> tuple[tuple[str, str], ...]:
     """Return `(value, label)` pairs for the modal's model dropdown."""
-    for adapter in _picker_choices():
+    for adapter in get_picker_choices():
         if adapter.value == runtime_adapter:
             return tuple((m.value, m.label) for m in adapter.models)
     return ()
@@ -97,7 +173,7 @@ def _models_for(runtime_adapter: str) -> tuple[tuple[str, str], ...]:
 
 def _runtime_adapter_options() -> tuple[tuple[str, str], ...]:
     """Return `(value, label)` pairs for the modal's runtime dropdown."""
-    return tuple((a.value, a.label) for a in _picker_choices())
+    return tuple((a.value, a.label) for a in get_picker_choices())
 
 
 @dataclass(frozen=True)
