@@ -155,7 +155,7 @@ long-running, agent-friendly part.
 
 1. **Update [`HogQLLexer.*.g4`](../../../posthog/hogql/grammar/) and
     [`HogQLParser.g4`](../../../posthog/hogql/grammar/HogQLParser.g4).**
-    Run `pnpm grammar:build` to regenerate the Python and C++ ANTLR
+    Run `pnpm grammar:build` to regenerate the C++ ANTLR
     artefacts:
 
     ```bash
@@ -165,9 +165,9 @@ long-running, agent-friendly part.
     That step requires the `antlr` 4.13.2 binary on `PATH`;
     instructions in
     [`posthog/hogql/grammar/README.md`](../../../posthog/hogql/grammar/README.md).
-    The script rewrites `common/hogql_parser/HogQL{Lexer,Parser}.{cpp,h,interp,tokens}`
-    and the matching Python files. Both backends now recognise the
-    new shape.
+    The script rewrites `common/hogql_parser/HogQL{Lexer,Parser}.{cpp,h,interp,tokens}`.
+    The C++ parser now recognises the new shape (the Rust parser is
+    hand-written, so update it to match in the steps below).
 
 2. **Pick the AST emission.** Decide what JSON the cpp visitor should
     return for the new shape. Either reuse an existing AST node or add

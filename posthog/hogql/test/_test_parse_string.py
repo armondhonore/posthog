@@ -1,15 +1,11 @@
 from posthog.test.base import BaseTest
 
-from hogql_parser import parse_string_literal_text as parse_string_cpp
+from hogql_parser import parse_string_literal_text as parse_string
 
-from posthog.hogql.constants import HogQLParserBackend
 from posthog.hogql.errors import SyntaxError
-from posthog.hogql.parse_string import parse_string_literal_text as parse_string_py
 
 
-def parse_string_test_factory(backend: HogQLParserBackend):
-    parse_string = parse_string_py if backend == "python" else parse_string_cpp
-
+def parse_string_test_factory():
     class TestParseString(BaseTest):
         def test_quote_types(self):
             self.assertEqual(parse_string("`asd`"), "asd")
