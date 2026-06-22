@@ -109,7 +109,7 @@ def test_source_for_pipeline_plumbs_arguments():
     )
 
 
-def test_source_for_pipeline_drops_last_value_when_not_incremental():
+def test_source_for_pipeline_forwards_last_value_when_not_incremental():
     inputs = mock.MagicMock()
     inputs.schema_name = "media"
     inputs.team_id = 7
@@ -119,7 +119,10 @@ def test_source_for_pipeline_drops_last_value_when_not_incremental():
     with mock.patch("posthog.temporal.data_imports.sources.instagram.source.instagram_source") as mock_source:
         InstagramSource().source_for_pipeline(_config(), mock.MagicMock(), inputs)
 
-    assert mock_source.call_args[1]["db_incremental_field_last_value"] is None
+    # `instagram_source` applies the `should_use_incremental_field` guard itself, so the
+    # call site forwards the raw value rather than pre-filtering it.
+    assert mock_source.call_args[1]["db_incremental_field_last_value"] == "2026-04-01"
+    assert mock_source.call_args[1]["should_use_incremental_field"] is False
 
 
 def test_validate_credentials_handles_token_failure():

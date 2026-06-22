@@ -255,10 +255,10 @@ def _insight_values_to_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for series in payload.get("data", []):
-        metric = series.get("name")
+        metric = series["name"]
         period = series.get("period")
         for value in series.get("values", []):
-            end_time = _parse_graph_datetime(value.get("end_time"))
+            end_time = _parse_graph_datetime(value["end_time"])
             # `end_time` marks the close of the daily period in the account's
             # timezone; we key rows on its calendar date, consistently per day.
             date = end_time.date() if isinstance(end_time, dt.datetime) else None
