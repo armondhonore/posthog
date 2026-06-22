@@ -49448,17 +49448,51 @@ export namespace Schemas {
       results: UserSlackIntegrationItem[];
     }
 
+    /**
+     * Settings-initiated link can target a specific PostHog team + Slack workspace.
+     *
+     * Both are optional — when omitted we fall back to the user's ``current_team``
+     * and that team's first Slack ``Integration`` (mirrors ``github_start`` for
+     * the simple case). The frontend passes both explicitly once it has the
+     * linkable-workspace list and the user has picked a workspace.
+     */
     export interface UserSlackLinkStartRequest {
       /**
          * Optional team/project id to link against; defaults to the user's current team.
          * @nullable
          */
       team_id?: number | null;
+      /**
+         * Specific Slack workspace id to link against, scoped to the team. Disambiguates when one team has multiple Slack integrations (rare).
+         * @nullable
+         */
+      slack_team_id?: string | null;
     }
 
     export interface UserSlackLinkStartResponse {
       /** URL to open in the browser to start the Sign-in-with-Slack flow. */
       install_url: string;
+    }
+
+    export interface UserSlackLinkableWorkspaceItem {
+      /** PostHog team/project id owning the Slack workspace install. */
+      posthog_team_id: number;
+      /** PostHog team/project name, for display in a picker. */
+      posthog_team_name: string;
+      /** PostHog organization name owning the team, for picker disambiguation. */
+      posthog_organization_name: string;
+      /** Slack workspace (team) id. */
+      slack_team_id: string;
+      /**
+         * Slack workspace display name as known by PostHog.
+         * @nullable
+         */
+      slack_team_name?: string | null;
+    }
+
+    export interface UserSlackLinkableWorkspaceListResponse {
+      /** Slack workspaces the user could link to but hasn't yet. */
+      results: UserSlackLinkableWorkspaceItem[];
     }
 
     export interface UtmEvent {

@@ -82,6 +82,7 @@ import type {
     UserSlackIntegrationListResponseApi,
     UserSlackLinkStartRequestApi,
     UserSlackLinkStartResponseApi,
+    UserSlackLinkableWorkspaceListResponseApi,
     UsersIntegrationsGithubBranchesRetrieveParams,
     UsersIntegrationsGithubReposRetrieveParams,
     UsersIntegrationsListParams,
@@ -3396,6 +3397,30 @@ export const usersIntegrationsSlackDestroy = async (
     })
 }
 
+export const getUsersIntegrationsSlackLinkableWorkspacesRetrieveUrl = (uuid: string) => {
+    return `/api/users/${uuid}/integrations/slack/linkable_workspaces/`
+}
+
+/**
+ * Return Slack workspaces in the user's organizations that they have
+ * not yet linked. The settings UI uses this list to decide whether to
+ * show a "Link my Slack account" button (non-empty list) and what to
+ * offer in the picker when several are connectable.
+ * @summary List Slack workspaces this user could link to
+ */
+export const usersIntegrationsSlackLinkableWorkspacesRetrieve = async (
+    uuid: string,
+    options?: RequestInit
+): Promise<UserSlackLinkableWorkspaceListResponseApi> => {
+    return apiMutator<UserSlackLinkableWorkspaceListResponseApi>(
+        getUsersIntegrationsSlackLinkableWorkspacesRetrieveUrl(uuid),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
 export const getUsersIntegrationsSlackStartCreateUrl = (uuid: string) => {
     return `/api/users/${uuid}/integrations/slack/start/`
 }
@@ -3406,11 +3431,14 @@ export const getUsersIntegrationsSlackStartCreateUrl = (uuid: string) => {
  * (already satisfied here), then to Slack OAuth, then back to our callback
  * which writes the ``UserIntegration`` row.
  *
- * Resolves the target Slack workspace from the user's ``team_id`` body
- * param (or ``current_team`` when omitted, mirroring ``github_start``).
- * Refuses if the target team has no Slack workspace connected, if the
+ * Without body params, falls back to the user's ``current_team`` and that
+ * team's first Slack ``Integration`` — works when there's exactly one
+ * linkable workspace. With ``team_id`` + ``slack_team_id``, links against
+ * the exact pair (what the frontend uses when a picker is shown).
+ *
+ * Refuses if the target team has no matching Slack workspace, if the
  * feature flag is off for the workspace, or if the user is already linked
- * to this workspace.
+ * to it.
  * @summary Start Slack identity link from settings
  */
 export const usersIntegrationsSlackStartCreate = async (

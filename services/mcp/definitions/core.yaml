@@ -689,6 +689,9 @@ tools:
     users-integrations-slack-destroy:
         operation: users_integrations_slack_destroy
         enabled: false
+    users-integrations-slack-linkable-workspaces-retrieve:
+        operation: users_integrations_slack_linkable_workspaces_retrieve
+        enabled: false
     users-integrations-slack-retrieve:
         operation: users_integrations_slack_retrieve
         enabled: false
