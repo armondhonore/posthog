@@ -1,0 +1,31 @@
+application:
+  name: posthog
+  pods:
+  - name: app
+    image: posthog/posthog:latest
+    path: /
+    servicePorts:
+    - 8000
+    vars:
+      DATABASE_URL: "postgresql://posthog:posthog@postgres.pod:5432/posthog"
+      REDIS_URL: "redis://redis.pod:6379"
+      SECRET_KEY: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+      SITE_URL: "https://relaxed-weasel-posthog.cloud.nexlayer.ai"
+      IS_BEHIND_PROXY: "true"
+      DISABLE_SECURE_SSL_REDIRECT: "true"
+  - name: postgres
+    image: postgres:16-alpine
+    servicePorts:
+    - 5432
+    vars:
+      POSTGRES_DB: posthog
+      POSTGRES_USER: posthog
+      POSTGRES_PASSWORD: posthog
+    volumes:
+    - name: posthog-db
+      mountPath: /var/lib/postgresql/data
+      size: 10Gi
+  - name: redis
+    image: redis:7-alpine
+    servicePorts:
+    - 6379
