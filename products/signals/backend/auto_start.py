@@ -8,6 +8,7 @@ from posthog.models import Team, User
 from posthog.sync import database_sync_to_async
 
 from products.signals.backend.models import SignalReportTask, SignalTeamConfig, SignalUserAutonomyConfig
+from products.signals.backend.quota import is_team_signals_quota_limited
 from products.signals.backend.report_generation.research import (
     ActionabilityAssessment,
     ActionabilityChoice,
@@ -172,6 +173,15 @@ async def maybe_autostart_implementation_task(
         return
 
     team = await Team.objects.select_related("organization").aget(id=team_id)
+
+    # Signals enforces its credit quota in the pipeline rather than at the LLM gateway. Shipping an
+    # implementation PR is the billable event, so a team over its Signals quota must not auto-start a
+    # new (expensive, billable) implementation. Skip silently — the report still lands in the inbox and
+    # can be implemented manually once the team is back under quota.
+    if await database_sync_to_async(is_team_signals_quota_limited, thread_sensitive=False)(team.api_token):
+        logger.info("signals_autostart_skipped_quota_limited", team_id=team_id, report_id=report_id)
+        return
+
     team_config = await SignalTeamConfig.objects.filter(team_id=team_id).afirst()
     team_default_priority = Priority(team_config.default_autostart_priority) if team_config else Priority.P2
 

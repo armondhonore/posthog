@@ -106,3 +106,34 @@ async def test_autostart_tags_implementation_ai_stage(ateam):
     kwargs = create_and_run_task.call_args.kwargs
     assert kwargs["origin_product"] == tasks_facade.TaskOriginProduct.SIGNAL_REPORT
     assert kwargs["ai_stage"] == "implementation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_autostart_skipped_when_over_signals_quota(ateam):
+    """A team over its Signals credits quota must not auto-start a billable implementation."""
+    assignee = SimpleNamespace(id=123)
+    create_and_run_task = MagicMock()
+
+    with (
+        patch.object(tasks_facade, "create_and_run_task", create_and_run_task),
+        patch("products.signals.backend.auto_start._resolve_autostart_assignee", return_value=assignee),
+        patch.object(SignalReportTask.objects, "acreate", AsyncMock()),
+        patch("products.signals.backend.auto_start.is_team_signals_quota_limited", return_value=True),
+    ):
+        await maybe_autostart_implementation_task(
+            team_id=ateam.id,
+            report_id=str(uuid.uuid4()),
+            repository="PostHog/posthog",
+            title="Fix the thing",
+            summary="A short summary",
+            actionability=ActionabilityAssessment(
+                explanation="Clearly actionable.",
+                actionability=ActionabilityChoice.IMMEDIATELY_ACTIONABLE,
+                already_addressed=False,
+            ),
+            reviewers_content=[_reviewer("octocat")],
+            priority=PriorityAssessment(explanation="High impact.", priority=Priority.P0),
+        )
+
+    create_and_run_task.assert_not_called()
