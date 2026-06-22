@@ -25,6 +25,7 @@ export function createAiEventSubpipeline<TInput extends AiEventSubpipelineInput,
     config: AiEventSubpipelineConfig
 ): PipelineBuilder<TInput, EmitEventStepOutput, TContext, AsyncOutput> {
     const { options, outputs, teamManager, groupTypeManager, hogTransformer, splitAiEventsConfig, topHog } = config
+    const { gatewayNonceStore } = config
 
     return (
         builder
@@ -65,7 +66,8 @@ export function createAiEventSubpipeline<TInput extends AiEventSubpipelineInput,
             .pipe(
                 createVerifyGatewayProvenanceStep(
                     options.AI_GATEWAY_SIGNING_SECRET,
-                    options.AI_GATEWAY_SIGNATURE_MAX_AGE_MS
+                    options.AI_GATEWAY_SIGNATURE_MAX_AGE_MS,
+                    gatewayNonceStore
                 )
             )
             .pipe(createProcessAiEventStep())

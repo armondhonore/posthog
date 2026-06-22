@@ -5,7 +5,11 @@ import { HogTransformer } from '~/common/hog-transformations/hog-transformer.int
 import { IngestionWarningsOutput } from '~/common/outputs'
 import { IngestionOutputs } from '~/common/outputs/ingestion-outputs'
 import { AI_EVENT_TYPES } from '~/ingestion/common/ai-event-types'
-import { AiEventSubpipelineFactory, AiEventSubpipelineInput } from '~/ingestion/common/ai-subpipeline.contract'
+import {
+    AiEventSubpipelineFactory,
+    AiEventSubpipelineInput,
+    GatewayNonceStore,
+} from '~/ingestion/common/ai-subpipeline.contract'
 import { EmitEventStepOutput } from '~/ingestion/common/steps/event-processing/emit-event-step'
 import { EventPipelineRunnerOptions } from '~/ingestion/common/steps/event-processing/event-pipeline-options'
 import { SplitAiEventsStepConfig } from '~/ingestion/common/steps/event-processing/split-ai-events-step'
@@ -30,6 +34,7 @@ export interface PerDistinctIdPipelineConfig {
     groupTypeManager: GroupTypeManager
     hogTransformer: HogTransformer
     topHog: TopHogWrapper
+    gatewayNonceStore?: GatewayNonceStore
 }
 
 export interface PerDistinctIdPipelineContext {
@@ -60,6 +65,7 @@ export function createPerDistinctIdPipeline<TInput extends PerDistinctIdPipeline
         groupTypeManager,
         hogTransformer,
         topHog,
+        gatewayNonceStore,
     } = config
 
     return builder.retry(
@@ -75,6 +81,7 @@ export function createPerDistinctIdPipeline<TInput extends PerDistinctIdPipeline
                             hogTransformer,
                             splitAiEventsConfig,
                             topHog,
+                            gatewayNonceStore,
                         })
                     )
                     .branch('event', (b) =>

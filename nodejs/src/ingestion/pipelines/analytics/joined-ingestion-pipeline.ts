@@ -4,7 +4,7 @@ import { GroupTypeManager } from '~/common/groups/group-type-manager'
 import { HogTransformer } from '~/common/hog-transformations/hog-transformer.interface'
 import { AppMetricsOutput, DlqOutput, GroupsOutput, IngestionWarningsOutput, OverflowOutput } from '~/common/outputs'
 import { IngestionOutputs } from '~/common/outputs/ingestion-outputs'
-import { AiEventSubpipelineFactory } from '~/ingestion/common/ai-subpipeline.contract'
+import { AiEventSubpipelineFactory, GatewayNonceStore } from '~/ingestion/common/ai-subpipeline.contract'
 import { CookielessManager } from '~/ingestion/common/cookieless/cookieless-manager'
 import { EventFilterManager } from '~/ingestion/common/event-filters'
 import { BatchWritingGroupStore } from '~/ingestion/common/groups/batch-writing-group-store'
@@ -104,6 +104,7 @@ export interface JoinedIngestionPipelineDeps {
     cookielessManager: CookielessManager
     groupTypeManager: GroupTypeManager
     topHog: TopHogRegistry
+    gatewayNonceStore?: GatewayNonceStore
 }
 
 type IngestionBatchContext = EventFiltersBatchContext & PersonsStoreBatchContext & GroupStoreBatchContext
@@ -165,6 +166,7 @@ export function createJoinedIngestionPipeline<
         groupTypeManager,
         topHog,
         aiSubpipelineFactory,
+        gatewayNonceStore,
     } = deps
 
     const topHogWrapper = createTopHogWrapper(topHog)
@@ -197,6 +199,7 @@ export function createJoinedIngestionPipeline<
         groupTypeManager,
         hogTransformer,
         topHog: topHogWrapper,
+        gatewayNonceStore,
     }
 
     return newBatchingPipeline<

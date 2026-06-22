@@ -31,6 +31,15 @@ export interface AiEventSubpipelineInput {
     groupStoreForBatch: GroupStoreForBatch
 }
 
+// `unavailable` means the backing store errored; the verify step treats it as a
+// first sighting (fail open). Defined here, on the composition contract, so the
+// analytics lane can pass a store through without importing the ai lane.
+export type GatewayNonceOutcome = 'first' | 'replay' | 'unavailable'
+
+export interface GatewayNonceStore {
+    markSeen(token: string, requestId: string, ttlMs: number): Promise<GatewayNonceOutcome>
+}
+
 export interface AiEventSubpipelineConfig {
     options: EventPipelineRunnerOptions
     outputs: IngestionOutputs<
@@ -41,6 +50,8 @@ export interface AiEventSubpipelineConfig {
     hogTransformer: HogTransformer
     splitAiEventsConfig: SplitAiEventsStepConfig
     topHog: TopHogWrapper
+    // Optional gateway-provenance replay guard; absent disables within-window dedup.
+    gatewayNonceStore?: GatewayNonceStore
 }
 
 /**

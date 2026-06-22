@@ -25,6 +25,7 @@ import { PersonsStore } from '~/ingestion/common/persons/persons-store'
 import { parseSplitAiEventsConfig } from '~/ingestion/common/steps/event-processing/split-ai-events-step'
 import { createOkContext } from '~/ingestion/framework/helpers'
 import { TopHog } from '~/ingestion/framework/tophog'
+import { RedisGatewayNonceStore } from '~/ingestion/pipelines/ai/pipelines/steps/gateway-nonce-dedup-store'
 import {
     JoinedIngestionPipelineConfig,
     JoinedIngestionPipelineContext,
@@ -292,6 +293,7 @@ export class IngestionConsumer {
             cookielessManager: this.deps.cookielessManager,
             groupTypeManager: this.deps.groupTypeManager,
             topHog: this.topHog!,
+            gatewayNonceStore: new RedisGatewayNonceStore(this.deps.redisPool),
         }
         this.joinedPipeline = createJoinedIngestionPipeline(joinedPipelineConfig, joinedPipelineDeps)
 

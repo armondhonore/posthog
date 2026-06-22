@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { Counter } from 'prom-client'
 
+import { GatewayNonceStore } from '~/ingestion/common/ai-subpipeline.contract'
 import { ok } from '~/ingestion/framework/results'
 import { ProcessingStep } from '~/ingestion/framework/steps'
 import { PluginEvent } from '~/plugin-scaffold'
@@ -16,6 +18,12 @@ const REQUEST_ID_PROPERTY = '$ai_gateway_request_id'
 // $ai_gateway* prefix), so it cannot be forged.
 const VERIFIED_PROPERTY = '$ai_gateway_verified'
 
+const gatewayDedupTotal = new Counter({
+    name: 'gateway_provenance_dedup_total',
+    help: 'Gateway provenance nonce dedup outcomes (first sighting, replay, store unavailable, missing nonce).',
+    labelNames: ['outcome'],
+})
+
 type VerifyGatewayProvenanceInput = {
     normalizedEvent: PluginEvent
     headers: EventHeaders
@@ -29,33 +37,33 @@ type VerifyGatewayProvenanceInput = {
 // secret is the shared HMAC key (empty disables verification — everything
 // is treated as unverified and stripped). maxAgeMs bounds how far signed_at
 // may be from the event's capture time (the server-stamped `now` header, so
-// ingestion lag is irrelevant), which is what defends against replaying a
-// captured signature; per-request dedup against the settlement ledger is a
-// follow-up that closes the within-window replay gap.
+// ingestion lag is irrelevant), defending against replaying a captured
+// signature outside that window. dedupStore, when supplied, closes the
+// within-window gap: a signed request_id is single-use, so a second event
+// reusing the tuple is stripped. Without a store, freshness is the only bound.
 export function createVerifyGatewayProvenanceStep<TInput extends VerifyGatewayProvenanceInput>(
     secret: string,
-    maxAgeMs: number
+    maxAgeMs: number,
+    dedupStore?: GatewayNonceStore
 ): ProcessingStep<TInput, TInput> {
     const key = Buffer.from(secret)
+    // A signature stays fresh for signedAt ± maxAgeMs, so a nonce first seen at
+    // the window's open edge must be remembered until its close edge: 2×maxAgeMs.
+    const dedupTtlMs = maxAgeMs * 2
 
-    return function verifyGatewayProvenanceStep(input) {
+    return async function verifyGatewayProvenanceStep(input) {
         const properties = input.normalizedEvent.properties ?? {}
         const gatewayKeys = Object.keys(properties).filter((k) => k.startsWith(GATEWAY_PREFIX))
         if (gatewayKeys.length === 0) {
-            return Promise.resolve(ok(input))
+            return ok(input)
         }
 
-        if (
+        const token = input.headers.token
+        const trusted =
             secret !== '' &&
-            isTrusted(
-                key,
-                input.headers.token,
-                input.normalizedEvent.distinct_id,
-                input.headers.now,
-                properties,
-                maxAgeMs
-            )
-        ) {
+            isTrusted(key, token, input.normalizedEvent.distinct_id, input.headers.now, properties, maxAgeMs)
+
+        if (trusted && !(await isReplay(dedupStore, token, properties, dedupTtlMs))) {
             // Drop the verification artifacts and stamp the trusted marker
             // ourselves, overwriting any client-supplied value.
             delete properties[SIGNATURE_PROPERTY]
@@ -66,8 +74,34 @@ export function createVerifyGatewayProvenanceStep<TInput extends VerifyGatewayPr
                 delete properties[k]
             }
         }
-        return Promise.resolve(ok(input))
+        return ok(input)
     }
+}
+
+// isReplay records the signed request_id as a single-use nonce and reports
+// whether it has been seen before. A store outage fails open (treated as a
+// first sighting) so a Redis blip can't strip the marker off legitimate
+// gateway events. token scopes the nonce; it is a verified string by the time
+// a trusted signature reaches here.
+async function isReplay(
+    dedupStore: GatewayNonceStore | undefined,
+    token: string | undefined,
+    properties: Record<string, any>,
+    ttlMs: number
+): Promise<boolean> {
+    if (!dedupStore || typeof token !== 'string') {
+        return false
+    }
+    const requestId = typeof properties[REQUEST_ID_PROPERTY] === 'string' ? properties[REQUEST_ID_PROPERTY] : ''
+    if (requestId === '') {
+        // The gateway always emits a unique request_id, so a valid signature
+        // over an empty one shouldn't occur; nothing to dedup on, so allow it.
+        gatewayDedupTotal.inc({ outcome: 'no_request_id' })
+        return false
+    }
+    const outcome = await dedupStore.markSeen(token, requestId, ttlMs)
+    gatewayDedupTotal.inc({ outcome })
+    return outcome === 'replay'
 }
 
 function isTrusted(

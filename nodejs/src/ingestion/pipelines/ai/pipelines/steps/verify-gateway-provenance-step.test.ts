@@ -1,11 +1,43 @@
 import { createHmac } from 'node:crypto'
 
+import { GatewayNonceOutcome, GatewayNonceStore } from '~/ingestion/common/ai-subpipeline.contract'
 import { PipelineResultType } from '~/ingestion/framework/results'
 import { PluginEvent } from '~/plugin-scaffold'
 import { EventHeaders } from '~/types'
 import { UUIDT } from '~/utils/utils'
 
 import { createVerifyGatewayProvenanceStep } from './verify-gateway-provenance-step'
+
+// Tracks (token, request_id) like the real store; 'unavailable' mode never
+// records, mimicking a Redis outage so every call fails open.
+class FakeNonceStore implements GatewayNonceStore {
+    seen = new Set<string>()
+    calls: { token: string; requestId: string; ttlMs: number }[] = []
+    constructor(private mode: 'track' | 'unavailable' = 'track') {}
+    markSeen(token: string, requestId: string, ttlMs: number): Promise<GatewayNonceOutcome> {
+        this.calls.push({ token, requestId, ttlMs })
+        if (this.mode === 'unavailable') {
+            return Promise.resolve('unavailable')
+        }
+        const key = `${token}:${requestId}`
+        const outcome: GatewayNonceOutcome = this.seen.has(key) ? 'replay' : 'first'
+        this.seen.add(key)
+        return Promise.resolve(outcome)
+    }
+}
+
+function signedProps(requestId: string): Record<string, any> {
+    return {
+        $ai_gateway: true,
+        $ai_gateway_request_id: requestId,
+        $ai_gateway_signed_at: FRESH_SIGNED_AT,
+        $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, requestId, FRESH_SIGNED_AT),
+    }
+}
+
+function stripped(props: Record<string, any>): boolean {
+    return !Object.keys(props).some((k) => k.startsWith('$ai_gateway'))
+}
 
 const SECRET = 'test-signing-secret'
 const TOKEN = 'phc_test'
@@ -49,9 +81,9 @@ function headers(token: string | undefined, now: Date | undefined): EventHeaders
 
 async function run(
     properties: Record<string, any>,
-    opts: { secret?: string; token?: string; now?: Date } = {}
+    opts: { secret?: string; token?: string; now?: Date; dedupStore?: GatewayNonceStore } = {}
 ): Promise<Record<string, any>> {
-    const step = createVerifyGatewayProvenanceStep(opts.secret ?? SECRET, MAX_AGE_MS)
+    const step = createVerifyGatewayProvenanceStep(opts.secret ?? SECRET, MAX_AGE_MS, opts.dedupStore)
     const normalizedEvent = createEvent(properties)
     const capturedAt = 'now' in opts ? opts.now : CAPTURE_TIME
     const result = await step({ normalizedEvent, headers: headers(opts.token ?? TOKEN, capturedAt) })
@@ -148,5 +180,57 @@ describe('verifyGatewayProvenanceStep', () => {
     it('leaves events without any $ai_gateway* properties untouched', async () => {
         const props = await run({ $ai_model: 'gpt-4', $ai_input_tokens: 10 })
         expect(props).toEqual({ $ai_model: 'gpt-4', $ai_input_tokens: 10 })
+    })
+
+    it('verifies a request_id on first sighting and strips it on replay', async () => {
+        const dedupStore = new FakeNonceStore()
+
+        const first = await run(signedProps('req-1'), { dedupStore })
+        expect(first.$ai_gateway_verified).toBe(true)
+
+        const replay = await run(signedProps('req-1'), { dedupStore })
+        expect(stripped(replay)).toBe(true)
+    })
+
+    it('scopes the nonce by token, so the same request_id under another token still verifies', async () => {
+        const dedupStore = new FakeNonceStore()
+        await run(signedProps('req-1'), { dedupStore })
+
+        // Different token signs its own valid event reusing request_id req-1.
+        const otherToken = 'phc_other'
+        const props = {
+            $ai_gateway: true,
+            $ai_gateway_request_id: 'req-1',
+            $ai_gateway_signed_at: FRESH_SIGNED_AT,
+            $ai_gateway_signature: sign(otherToken, DISTINCT_ID, 'req-1', FRESH_SIGNED_AT, SECRET),
+        }
+        const out = await run(props, { dedupStore, token: otherToken })
+        expect(out.$ai_gateway_verified).toBe(true)
+    })
+
+    it('verifies even on replay when the dedup store is unavailable (fail open)', async () => {
+        const dedupStore = new FakeNonceStore('unavailable')
+        const first = await run(signedProps('req-2'), { dedupStore })
+        const second = await run(signedProps('req-2'), { dedupStore })
+        expect(first.$ai_gateway_verified).toBe(true)
+        expect(second.$ai_gateway_verified).toBe(true)
+    })
+
+    it('skips dedup when request_id is absent', async () => {
+        const dedupStore = new FakeNonceStore()
+        const props = {
+            $ai_gateway: true,
+            $ai_gateway_signed_at: FRESH_SIGNED_AT,
+            $ai_gateway_signature: sign(TOKEN, DISTINCT_ID, '', FRESH_SIGNED_AT),
+        }
+        const out = await run(props, { dedupStore })
+        expect(out.$ai_gateway_verified).toBe(true)
+        expect(dedupStore.calls).toHaveLength(0)
+    })
+
+    it('remembers the nonce for twice the freshness window', async () => {
+        const dedupStore = new FakeNonceStore()
+        await run(signedProps('req-3'), { dedupStore })
+        expect(dedupStore.calls[0].ttlMs).toBe(MAX_AGE_MS * 2)
     })
 })

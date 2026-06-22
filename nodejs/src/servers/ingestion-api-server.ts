@@ -18,6 +18,7 @@ import { parseSplitAiEventsConfig } from '~/ingestion/common/steps/event-process
 import { createOkContext } from '~/ingestion/framework/helpers'
 import { TopHog } from '~/ingestion/framework/tophog'
 import { createAiEventSubpipeline } from '~/ingestion/pipelines/ai'
+import { RedisGatewayNonceStore } from '~/ingestion/pipelines/ai/pipelines/steps/gateway-nonce-dedup-store'
 import {
     JoinedIngestionPipelineConfig,
     JoinedIngestionPipelineContext,
@@ -386,6 +387,7 @@ export class IngestionApiServer implements NodeServer {
             cookielessManager: this.cookielessManager,
             groupTypeManager,
             topHog: this.topHog,
+            gatewayNonceStore: this.redisPool ? new RedisGatewayNonceStore(this.redisPool) : undefined,
         }
         this.joinedPipeline = createJoinedIngestionPipeline(joinedPipelineConfig, joinedPipelineDeps)
 
