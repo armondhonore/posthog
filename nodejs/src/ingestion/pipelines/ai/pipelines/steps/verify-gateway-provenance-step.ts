@@ -1,10 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-import { PluginEvent } from '~/plugin-scaffold'
-
-import { EventHeaders } from '~/types'
 import { ok } from '~/ingestion/framework/results'
 import { ProcessingStep } from '~/ingestion/framework/steps'
+import { PluginEvent } from '~/plugin-scaffold'
+import { EventHeaders } from '~/types'
 
 // $ai_gateway* properties are client-settable on the public capture path,
 // so nothing downstream may trust them until this step has verified them.
