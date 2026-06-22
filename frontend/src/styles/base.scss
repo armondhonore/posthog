@@ -1619,31 +1619,25 @@
             }
         }
 
-        // Only use this class in visual regression tests.
-        //
-        // A 0ms animation-duration is supposed to snap every animation to its final
-        // keyframe via forwards fill, but headless Chromium in CI handles a
-        // zero-duration animation's fill inconsistently and can paint the 0% keyframe
-        // instead — collapsing entrance animations to their start state (opacity 0,
-        // width 0, etc.), which blanks faded-in content and width-expanded markers in
-        // snapshots. Give every animation a tiny real duration plus a negative delay so
-        // it is deterministically in its finished (after) phase at every frame, and
-        // forwards holds the 100% keyframe.
+        // Only use this class in visual regression tests
         *,
         *::before,
         *::after {
-            transition-delay: 0ms !important;
             transition-duration: 0ms !important;
-            animation-duration: 1ms !important;
-            animation-delay: -1ms !important;
-            animation-iteration-count: 1 !important;
             animation-fill-mode: forwards !important;
+            animation-duration: 0ms !important;
+            animation-iteration-count: 1 !important;
         }
 
-        // Belt-and-suspenders for the two entrance animations whose final layout only
-        // exists via the animation's forwards fill (so a misfired fill doesn't just dim
-        // them, it collapses them): pin the end state directly. As !important author
-        // rules these override the animation regardless of how the frame settles.
+        // The animation-duration:0ms + forwards override above is meant to snap every
+        // animation to its final keyframe, but headless Chromium in CI handles a
+        // zero-duration animation's fill inconsistently and can paint the 0% keyframe
+        // instead. For entrance animations whose final layout exists ONLY via the
+        // forwards fill, that doesn't just dim the element — it collapses it (faded-in
+        // content stays invisible; width-expanded markers stay at width 0 and pile up at
+        // the bar's left edge). Pin the end state directly for those components; as
+        // !important author rules these override the animation regardless of how the
+        // frame settles.
         .fade-component-container {
             // Fade animates opacity 0 -> 1.
             opacity: 1 !important;
