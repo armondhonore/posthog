@@ -7,14 +7,21 @@ from django.shortcuts import get_object_or_404
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.tagged_item import TaggedItemViewSetMixin
 from posthog.api.utils import log_activity_from_viewset
+from posthog.exceptions import Conflict
 from posthog.rbac.access_control_api_mixin import AccessControlViewSetMixin
 
+from products.customer_analytics.backend.facade import api as customer_analytics_facade
+from products.customer_analytics.backend.logic.custom_property_values import (
+    CustomPropertyValueConflict,
+    InvalidCustomPropertyValue,
+)
 from products.customer_analytics.backend.models import (
     Account,
     CustomerJourney,
@@ -27,6 +34,8 @@ from products.customer_analytics.backend.presentation.views.serializers import (
     CustomerJourneySerializer,
     CustomerProfileConfigSerializer,
     CustomPropertyDefinitionSerializer,
+    CustomPropertyValueSerializer,
+    CustomPropertyValueWriteSerializer,
 )
 from products.customer_analytics.backend.presentation.views.utils import log_customer_profile_config_activity
 from products.notebooks.backend.models import Notebook, ResourceNotebook
@@ -326,3 +335,55 @@ class AccountNotebookViewSet(
     @transaction.atomic
     def perform_destroy(self, instance: Notebook):
         instance.delete()
+
+
+@extend_schema(
+    tags=["customer_analytics"],
+    parameters=[
+        OpenApiParameter(
+            name="account_id",
+            type=OpenApiTypes.UUID,
+            location=OpenApiParameter.PATH,
+            description="UUID of the parent account.",
+        ),
+    ],
+)
+class CustomPropertyValueViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.GenericViewSet):
+    scope_object = "account"
+    serializer_class = CustomPropertyValueSerializer
+    pagination_class = None
+
+    def _get_account(self) -> Account:
+        queryset = self.user_access_control.filter_queryset_by_access_level(
+            Account.objects.unscoped().filter(team_id=self.team.id),
+        )
+        return get_object_or_404(queryset, id=self.parents_query_dict["account_id"])
+
+    @extend_schema(responses={200: CustomPropertyValueSerializer(many=True)})
+    def list(self, request, *args, **kwargs) -> Response:
+        account = self._get_account()
+        values = customer_analytics_facade.list_active_custom_property_values(self.team.id, account.id)
+        return Response(CustomPropertyValueSerializer(values, many=True).data)
+
+    @extend_schema(request=CustomPropertyValueWriteSerializer, responses={201: CustomPropertyValueSerializer})
+    def create(self, request, *args, **kwargs) -> Response:
+        account = self._get_account()
+        write = CustomPropertyValueWriteSerializer(data=request.data)
+        write.is_valid(raise_exception=True)
+
+        try:
+            value = customer_analytics_facade.set_custom_property_value(
+                team_id=self.team.id,
+                account_id=account.id,
+                definition_id=write.validated_data["definition"],
+                value=write.validated_data["value"],
+                created_by_id=request.user.id,
+            )
+        except CustomPropertyDefinition.DoesNotExist:
+            raise ValidationError({"definition": "Custom property definition not found."})
+        except InvalidCustomPropertyValue as exc:
+            raise ValidationError({"value": str(exc)})
+        except CustomPropertyValueConflict as exc:
+            raise Conflict(str(exc))
+
+        return Response(CustomPropertyValueSerializer(value).data, status=status.HTTP_201_CREATED)
