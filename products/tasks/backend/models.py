@@ -339,7 +339,9 @@ class Task(FileSystemSyncMixin, DeletedMetaFields, models.Model):
         internal: bool = False,
         output_schema: type[BaseModel] | dict | None = None,
         interaction_origin: str | None = None,
+        runtime_adapter: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         initial_permission_mode: str | None = None,
         sandbox_resources: "SandboxResources | None" = None,
         sandbox_timeout_seconds: int | None = None,
@@ -443,6 +445,14 @@ class Task(FileSystemSyncMixin, DeletedMetaFields, models.Model):
 
         if model:
             extra_state["model"] = model
+
+        # Runtime adapter and reasoning effort flow through the same
+        # extra_state path as `model`. They're optional; when unset, the task
+        # processing context falls back to its own defaults.
+        if runtime_adapter:
+            extra_state["runtime_adapter"] = runtime_adapter
+        if reasoning_effort:
+            extra_state["reasoning_effort"] = reasoning_effort
 
         # Forwarded to the in-sandbox agent and lifted onto its $ai_generation traces as an
         # `ai_stage` property (see TaskProcessingContext / agent-server configureEnvironment).

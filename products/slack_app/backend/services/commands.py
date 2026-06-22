@@ -29,6 +29,7 @@ def _handle_help(
             "`@PostHog project workspace <id>` — Set the workspace-wide default project (Slack admins/owners only)"
         )
 
+    lines.append("`@PostHog settings` — Open the App Home tab where AI preferences live")
     lines.append("`@PostHog help` — Show this message\n")
     lines.append("You can also reply in an active thread to send follow-up messages to the agent.")
 
@@ -484,3 +485,23 @@ def dispatch_rules_command(
             command.project_team_id,
             workspace_candidates=workspace_candidates,
         )
+    elif command.action == "settings":
+        _handle_settings(slack, channel, thread_ts)
+
+
+def _handle_settings(slack: SlackIntegration, channel: str, thread_ts: str) -> None:
+    """Point users at the App Home tab where AI preferences live.
+
+    A `views.open` modal would be the nicer UX, but mention events don't carry
+    a `trigger_id` — only interactivity payloads do. The Home tab gives users
+    the same picker and is one click away.
+    """
+    slack.client.chat_postMessage(
+        channel=channel,
+        thread_ts=thread_ts,
+        text=(
+            "Open the PostHog app in the Slack sidebar and switch to the *Home* tab to set "
+            "your AI preferences. From there you can pick the model and runtime that handle "
+            "your @PostHog requests."
+        ),
+    )
