@@ -1,10 +1,10 @@
 import { createHmac } from 'node:crypto'
 
+import { PipelineResultType } from '~/ingestion/framework/results'
 import { PluginEvent } from '~/plugin-scaffold'
-
 import { EventHeaders } from '~/types'
 import { UUIDT } from '~/utils/utils'
-import { PipelineResultType } from '~/ingestion/framework/results'
+
 import { createVerifyGatewayProvenanceStep } from './verify-gateway-provenance-step'
 
 const SECRET = 'test-signing-secret'
@@ -74,6 +74,8 @@ describe('verifyGatewayProvenanceStep', () => {
         expect(props.$ai_gateway_verified).toBe(true)
         expect(props.$ai_gateway_signature).toBeUndefined()
         expect(props.$ai_gateway_signed_at).toBeUndefined()
+        expect(props.$ai_gateway).toBe(true)
+        expect(props.$ai_gateway_request_id).toBe('req-123')
         expect(props.$ai_model).toBe('claude')
     })
 
