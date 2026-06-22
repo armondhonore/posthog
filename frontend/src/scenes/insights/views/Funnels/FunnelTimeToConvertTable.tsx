@@ -47,10 +47,10 @@ export function FunnelTimeToConvertTable(): JSX.Element | null {
             rowKey="id"
             data-attr="funnel-time-to-convert-table"
             footer={
-                conversionMetrics.averageTime ? (
+                conversionMetrics.medianTime ? (
                     <div className="flex items-center justify-between px-2 py-1">
-                        <span className="font-medium">Average time to convert</span>
-                        <span>{humanFriendlyDuration(conversionMetrics.averageTime, { maxUnits: 3 })}</span>
+                        <span className="font-medium">Median time to convert</span>
+                        <span>{humanFriendlyDuration(conversionMetrics.medianTime, { maxUnits: 3 })}</span>
                     </div>
                 ) : undefined
             }
