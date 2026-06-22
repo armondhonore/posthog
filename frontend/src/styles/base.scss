@@ -1629,6 +1629,16 @@
             animation-iteration-count: 1 !important;
         }
 
+        // Fade animates content in from opacity 0. The animation-duration:0ms +
+        // animation-fill-mode:forwards override above lands on opacity 1 in local
+        // Chromium, but headless Chromium in CI handles a zero-duration animation's
+        // fill inconsistently and can paint the 0% keyframe instead — leaving
+        // faded-in content invisible in snapshots. Pin the end (visible) state
+        // directly; as an !important author rule it overrides the animation regardless.
+        .fade-component-container {
+            opacity: 1 !important;
+        }
+
         // Hide hogfetti (JS-driven confetti animation) — Math.random + requestAnimationFrame
         // makes it inherently non-deterministic, CSS animation overrides don't help
         .Hogfetti {
