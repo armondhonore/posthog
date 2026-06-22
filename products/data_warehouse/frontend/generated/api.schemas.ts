@@ -2039,7 +2039,7 @@ export const ExternalDataSourceTypeEnumApi = {
     Custom: 'Custom',
     Tile38: 'Tile38',
     Chatwoot: 'Chatwoot',
-    RB2B: 'RB2B',
+    Rb2b: 'RB2B',
 } as const
 
 export interface SimpleExternalDataSourceSerializersApi {
