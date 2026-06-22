@@ -29,6 +29,14 @@ export interface PersonalSlackIntegration {
     created_at: string | null
 }
 
+export interface LinkableSlackWorkspace {
+    posthog_team_id: number
+    posthog_team_name: string
+    posthog_organization_name: string
+    slack_team_id: string
+    slack_team_name: string | null
+}
+
 interface GithubStartResponse {
     install_url: string
 }
@@ -79,6 +87,10 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
         connectGitHub: true,
         disconnectGitHub: (installationId: string) => ({ installationId }),
         disconnectSlack: (slackUserId: string) => ({ slackUserId }),
+        // `connectSlack` is auto-defined by the slackConnect loader below.
+        // Its payload is `{ workspace? }` so the picker can target a specific
+        // Slack workspace; when omitted the backend falls back to the user's
+        // current team's first Slack integration (one-workspace simple case).
     }),
 
     loaders(() => ({
@@ -104,6 +116,17 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
                 },
             },
         ],
+        linkableSlackWorkspaces: [
+            [] as LinkableSlackWorkspace[],
+            {
+                loadLinkableSlackWorkspaces: async () => {
+                    const response = await api.get<{ results: LinkableSlackWorkspace[] }>(
+                        'api/users/@me/integrations/slack/linkable_workspaces/'
+                    )
+                    return response.results
+                },
+            },
+        ],
         // Trades a manual action+reducer pair for `connectSlack` (auto-defined
         // by the loader) plus `slackConnectLoading` (kea-loaders convention),
         // which the button reads for its spinner. The return value is unused;
@@ -111,11 +134,17 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
         slackConnect: [
             false as boolean,
             {
-                connectSlack: async () => {
+                connectSlack: async (payload: { workspace?: LinkableSlackWorkspace } = {}) => {
                     try {
+                        const body = payload.workspace
+                            ? {
+                                  team_id: payload.workspace.posthog_team_id,
+                                  slack_team_id: payload.workspace.slack_team_id,
+                              }
+                            : {}
                         const response = await api.create<SlackStartResponse>(
                             'api/users/@me/integrations/slack/start/',
-                            {}
+                            body
                         )
                         window.location.href = response.install_url
                         return true
@@ -151,6 +180,9 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
                 await api.delete(`api/users/@me/integrations/slack/${encodeURIComponent(slackUserId)}/`)
                 lemonToast.success('Unlinked your Slack account')
                 actions.loadSlackIntegrations()
+                // Refresh linkable so the just-unlinked workspace re-appears
+                // in the connect picker without a page reload.
+                actions.loadLinkableSlackWorkspaces()
             } catch {
                 lemonToast.error('Could not unlink your Slack account.')
             }
@@ -182,6 +214,7 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
         afterMount: () => {
             actions.loadIntegrations()
             actions.loadSlackIntegrations()
+            actions.loadLinkableSlackWorkspaces()
             const params = new URLSearchParams(window.location.search)
 
             // Stash ``connect_from`` so the post-roundtrip success toast can surface a

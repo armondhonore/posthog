@@ -138,10 +138,23 @@ class UserSlackIntegrationListResponseSerializer(serializers.Serializer):
 
 
 class UserSlackLinkStartRequestSerializer(serializers.Serializer):
+    """Settings-initiated link can target a specific PostHog team + Slack workspace.
+
+    Both are optional — when omitted we fall back to the user's ``current_team``
+    and that team's first Slack ``Integration`` (mirrors ``github_start`` for
+    the simple case). The frontend passes both explicitly once it has the
+    linkable-workspace list and the user has picked a workspace.
+    """
+
     team_id = serializers.IntegerField(
         required=False,
         allow_null=True,
         help_text="Optional team/project id to link against; defaults to the user's current team.",
+    )
+    slack_team_id = serializers.CharField(
+        required=False,
+        allow_null=True,
+        help_text="Specific Slack workspace id to link against, scoped to the team. Disambiguates when one team has multiple Slack integrations (rare).",
     )
 
 
@@ -151,13 +164,41 @@ class UserSlackLinkStartResponseSerializer(serializers.Serializer):
     )
 
 
+class UserSlackLinkableWorkspaceItemSerializer(serializers.Serializer):
+    posthog_team_id = serializers.IntegerField(help_text="PostHog team/project id owning the Slack workspace install.")
+    posthog_team_name = serializers.CharField(help_text="PostHog team/project name, for display in a picker.")
+    posthog_organization_name = serializers.CharField(
+        help_text="PostHog organization name owning the team, for picker disambiguation.",
+    )
+    slack_team_id = serializers.CharField(help_text="Slack workspace (team) id.")
+    slack_team_name = serializers.CharField(
+        required=False,
+        allow_null=True,
+        help_text="Slack workspace display name as known by PostHog.",
+    )
+
+
+class UserSlackLinkableWorkspaceListResponseSerializer(serializers.Serializer):
+    results = UserSlackLinkableWorkspaceItemSerializer(
+        many=True,
+        help_text="Slack workspaces the user could link to but hasn't yet.",
+    )
+
+
 @extend_schema(extensions={"x-product": "core"})
 class UserIntegrationViewSet(viewsets.GenericViewSet):
     """`/api/users/@me/integrations/` — manage the user's personal GitHub integrations."""
 
     scope_object = "user"
     required_scopes: list[str] | None = None
-    scope_object_read_actions = ["list", "retrieve", "github_repos", "github_branches", "slack_list"]
+    scope_object_read_actions = [
+        "list",
+        "retrieve",
+        "github_repos",
+        "github_branches",
+        "slack_list",
+        "slack_linkable",
+    ]
     scope_object_write_actions = [
         "create",
         "update",
@@ -418,6 +459,54 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
         return Response({"results": [_serialize_slack_integration(integration) for integration in integrations]})
 
     @extend_schema(
+        summary="List Slack workspaces this user could link to",
+        responses={200: UserSlackLinkableWorkspaceListResponseSerializer},
+    )
+    @action(methods=["GET"], detail=False, url_path="slack/linkable_workspaces")
+    def slack_linkable(self, request: Request, **_kwargs) -> Response:
+        """Return Slack workspaces in the user's organizations that they have
+        not yet linked. The settings UI uses this list to decide whether to
+        show a "Link my Slack account" button (non-empty list) and what to
+        offer in the picker when several are connectable.
+        """
+        user = self._get_user()
+        org_ids = set(user.organization_memberships.values_list("organization_id", flat=True))
+        if not org_ids:
+            return Response({"results": []})
+
+        already_linked_slack_team_ids = set(
+            UserIntegration.objects.filter(
+                user=user,
+                kind=UserIntegration.IntegrationKind.SLACK,
+            ).values_list("config__slack_team_id", flat=True)
+        )
+
+        candidates = (
+            Integration.objects.filter(kind="slack", team__organization_id__in=org_ids)
+            .exclude(integration_id__in=already_linked_slack_team_ids)
+            .select_related("team", "team__organization")
+        )
+
+        results: list[dict[str, Any]] = []
+        for integration in candidates:
+            # Feature-flag check per workspace so an org that hasn't rolled out
+            # the flag yet doesn't show up in another org's picker.
+            from products.slack_app.backend.services.slack_user_link import link_feature_enabled
+
+            if not link_feature_enabled(integration, integration.integration_id):
+                continue
+            results.append(
+                {
+                    "posthog_team_id": integration.team_id,
+                    "posthog_team_name": integration.team.name,
+                    "posthog_organization_name": integration.team.organization.name,
+                    "slack_team_id": integration.integration_id,
+                    "slack_team_name": (integration.config or {}).get("team", {}).get("name"),
+                }
+            )
+        return Response({"results": results})
+
+    @extend_schema(
         summary="Start Slack identity link from settings",
         request=UserSlackLinkStartRequestSerializer,
         responses={200: UserSlackLinkStartResponseSerializer},
@@ -429,11 +518,14 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
         (already satisfied here), then to Slack OAuth, then back to our callback
         which writes the ``UserIntegration`` row.
 
-        Resolves the target Slack workspace from the user's ``team_id`` body
-        param (or ``current_team`` when omitted, mirroring ``github_start``).
-        Refuses if the target team has no Slack workspace connected, if the
+        Without body params, falls back to the user's ``current_team`` and that
+        team's first Slack ``Integration`` — works when there's exactly one
+        linkable workspace. With ``team_id`` + ``slack_team_id``, links against
+        the exact pair (what the frontend uses when a picker is shown).
+
+        Refuses if the target team has no matching Slack workspace, if the
         feature flag is off for the workspace, or if the user is already linked
-        to this workspace.
+        to it.
         """
         from products.slack_app.backend.services.slack_user_link import build_invite_url, link_feature_enabled
 
@@ -442,7 +534,15 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
         if team is None:
             raise exceptions.ValidationError("No team available for this user.")
 
-        workspace = Integration.objects.filter(team=team, kind="slack").first()
+        # If the caller specifies a Slack workspace explicitly, honor it (this
+        # is the picker path). Otherwise pick the first Slack integration on
+        # the resolved team (the simple "Link my Slack account" path).
+        body: Any = request.data if isinstance(request.data, dict) else {}
+        slack_team_id_hint = body.get("slack_team_id")
+        workspace_query = Integration.objects.filter(team=team, kind="slack")
+        if slack_team_id_hint:
+            workspace_query = workspace_query.filter(integration_id=slack_team_id_hint)
+        workspace = workspace_query.first()
         if workspace is None:
             raise exceptions.ValidationError(
                 "This project has no Slack workspace connected. Ask an admin to install the Slack app first."

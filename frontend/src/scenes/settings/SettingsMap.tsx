@@ -1976,6 +1976,13 @@ export const SETTINGS_MAP: SettingSection[] = [
                     'Bind your Slack identity to this PostHog account so @PostHog mentions route to you even when your Slack email and PostHog email differ.',
                 component: <PersonalSlackIntegrations />,
                 keywords: ['slack', 'integration', 'identity', 'link', 'mention', 'personal'],
+                // The whole Slack card is hidden when the flag is off — title,
+                // description, search keywords, and the empty-state copy all
+                // disappear together. The settings infra honors `flag` at the
+                // selector layer (settingsLogic.matchesFlagDefinition), so
+                // gating here is equivalent to not declaring the setting at
+                // all when the flag is off.
+                flag: 'SLACK_USER_LINK',
             },
         ],
     },

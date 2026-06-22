@@ -1095,3 +1095,57 @@ class TestUserIntegrationSlackEndpoints(APIBaseTest):
         with patch("products.slack_app.backend.services.slack_user_link.link_feature_enabled", return_value=False):
             response = self.client.post("/api/users/@me/integrations/slack/start/", data={}, format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_slack_linkable_empty_when_no_workspaces_connected(self):
+        with self._enable_flag():
+            response = self.client.get("/api/users/@me/integrations/slack/linkable_workspaces/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["results"], [])
+
+    def test_slack_linkable_returns_workspaces_user_can_still_link(self):
+        self._seed_workspace_integration()
+        with self._enable_flag():
+            response = self.client.get("/api/users/@me/integrations/slack/linkable_workspaces/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.json()["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["slack_team_id"], "T12345")
+        self.assertEqual(results[0]["posthog_team_id"], self.team.id)
+
+    def test_slack_linkable_excludes_workspaces_user_already_linked(self):
+        self._seed_workspace_integration()
+        _create_slack_user_integration(self.user, slack_team_id="T12345")
+        with self._enable_flag():
+            response = self.client.get("/api/users/@me/integrations/slack/linkable_workspaces/")
+        # The screenshot bug: user has linked the only workspace, so the
+        # picker has nothing to offer. Frontend uses the empty list to hide
+        # the "Link another workspace" button instead of letting the user
+        # attempt a duplicate link the backend would reject.
+        self.assertEqual(response.json()["results"], [])
+
+    def test_slack_linkable_skips_workspaces_with_flag_off(self):
+        self._seed_workspace_integration()
+        with patch("products.slack_app.backend.services.slack_user_link.link_feature_enabled", return_value=False):
+            response = self.client.get("/api/users/@me/integrations/slack/linkable_workspaces/")
+        self.assertEqual(response.json()["results"], [])
+
+    def test_slack_start_with_explicit_slack_team_id_links_against_picked_workspace(self):
+        self._seed_workspace_integration()
+        with self._enable_flag():
+            response = self.client.post(
+                "/api/users/@me/integrations/slack/start/",
+                data={"team_id": self.team.id, "slack_team_id": "T12345"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("/complete/slack-link/start/?state=", response.json()["install_url"])
+
+    def test_slack_start_with_explicit_unknown_slack_team_id_is_400(self):
+        self._seed_workspace_integration()
+        with self._enable_flag():
+            response = self.client.post(
+                "/api/users/@me/integrations/slack/start/",
+                data={"team_id": self.team.id, "slack_team_id": "T-NOPE"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

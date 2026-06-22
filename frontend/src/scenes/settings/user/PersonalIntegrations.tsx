@@ -9,6 +9,7 @@ import { userGithubIntegrationLogic } from 'lib/integrations/userGithubIntegrati
 import { IconSlack } from 'lib/lemon-ui/icons'
 
 import {
+    LinkableSlackWorkspace,
     personalIntegrationsLogic,
     PersonalGitHubIntegration,
     PersonalSlackIntegration,
@@ -199,20 +200,70 @@ export function PersonalGitHubIntegrations(): JSX.Element {
     )
 }
 
+function openSlackWorkspacePicker(
+    workspaces: LinkableSlackWorkspace[],
+    connectSlack: (payload: { workspace: LinkableSlackWorkspace }) => void
+): void {
+    LemonDialog.open({
+        title: 'Pick a Slack workspace to link',
+        description: (
+            <div className="deprecated-space-y-2">
+                <p className="text-sm text-secondary">
+                    Your organizations are connected to multiple Slack workspaces. Pick the one you want to bind your
+                    PostHog identity to.
+                </p>
+                <div className="divide-y rounded border">
+                    {workspaces.map((workspace) => (
+                        <button
+                            key={`${workspace.posthog_team_id}:${workspace.slack_team_id}`}
+                            type="button"
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-surface-secondary"
+                            onClick={() => {
+                                // `connectSlack` triggers a full-page redirect to Slack
+                                // OAuth, so the dialog disappears with the navigation —
+                                // no programmatic close needed.
+                                connectSlack({ workspace })
+                            }}
+                        >
+                            <span className="flex items-center gap-2 min-w-0">
+                                <IconSlack className="shrink-0 text-lg" />
+                                <span className="min-w-0">
+                                    <span className="font-semibold block truncate">
+                                        {workspace.slack_team_name || workspace.slack_team_id}
+                                    </span>
+                                    <span className="text-xs text-secondary block truncate">
+                                        {workspace.posthog_organization_name} · {workspace.posthog_team_name}
+                                    </span>
+                                </span>
+                            </span>
+                            <IconPlus className="shrink-0 text-secondary" />
+                        </button>
+                    ))}
+                </div>
+            </div>
+        ),
+        primaryButton: null,
+        secondaryButton: { children: 'Cancel' },
+    })
+}
+
 export function PersonalSlackIntegrations(): JSX.Element {
-    const { slackIntegrations, slackIntegrationsLoading, slackLinkEnabled, slackConnectLoading } =
-        useValues(personalIntegrationsLogic)
+    const {
+        slackIntegrations,
+        slackIntegrationsLoading,
+        slackConnectLoading,
+        linkableSlackWorkspaces,
+        linkableSlackWorkspacesLoading,
+    } = useValues(personalIntegrationsLogic)
     const { connectSlack } = useActions(personalIntegrationsLogic)
 
-    // When the feature flag is off we hide the entire section, including any
-    // pre-existing rows — the unlink endpoint stays reachable so support can
-    // walk a user through unlinking via the API directly during a rollback.
-    if (!slackLinkEnabled) {
-        return (
-            <div className="px-4 py-6 text-center text-sm text-secondary">
-                Slack identity linking isn't enabled for your organization yet.
-            </div>
-        )
+    const hasLinkableWorkspaces = linkableSlackWorkspaces.length > 0
+    const onConnect = (): void => {
+        if (linkableSlackWorkspaces.length > 1) {
+            openSlackWorkspacePicker(linkableSlackWorkspaces, connectSlack)
+        } else if (linkableSlackWorkspaces.length === 1) {
+            connectSlack({ workspace: linkableSlackWorkspaces[0] })
+        }
     }
 
     return (
@@ -233,21 +284,27 @@ export function PersonalSlackIntegrations(): JSX.Element {
                     <SlackLinkRow key={integration.id} integration={integration} />
                 ))
             )}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-                <LemonButton
-                    type="secondary"
-                    size="small"
-                    icon={<IconPlus />}
-                    onClick={connectSlack}
-                    loading={slackConnectLoading}
-                >
-                    {slackIntegrations.length === 0 ? 'Link my Slack account' : 'Link another workspace'}
-                </LemonButton>
-                <span className="text-xs text-secondary text-balance">
-                    You'll be redirected to Slack to authorize this PostHog account. The link binds your Slack user id
-                    to your PostHog account — no Slack token is kept after the redirect.
-                </span>
-            </div>
+            {/* Button is hidden when there are no linkable workspaces left — every workspace
+                accessible via the user's orgs has already been linked, or none are connected at
+                all. Server still defends with a 400 if the user gets here some other way. */}
+            {(linkableSlackWorkspacesLoading || hasLinkableWorkspaces) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                    <LemonButton
+                        type="secondary"
+                        size="small"
+                        icon={<IconPlus />}
+                        onClick={onConnect}
+                        loading={slackConnectLoading || linkableSlackWorkspacesLoading}
+                        disabledReason={!hasLinkableWorkspaces ? 'Loading…' : undefined}
+                    >
+                        {slackIntegrations.length === 0 ? 'Link my Slack account' : 'Link another workspace'}
+                    </LemonButton>
+                    <span className="text-xs text-secondary text-balance">
+                        You'll be redirected to Slack to authorize this PostHog account. The link binds your Slack user
+                        id to your PostHog account — no Slack token is kept after the redirect.
+                    </span>
+                </div>
+            )}
         </div>
     )
 }
