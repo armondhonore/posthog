@@ -21296,7 +21296,8 @@
                 "NewRelic",
                 "Custom",
                 "Tile38",
-                "Chatwoot"
+                "Chatwoot",
+                "RB2B"
             ],
             "type": "string"
         },

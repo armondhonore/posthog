@@ -1796,6 +1796,7 @@ class ExternalDataSourceType(StrEnum):
     CUSTOM = "Custom"
     TILE38 = "Tile38"
     CHATWOOT = "Chatwoot"
+    RB2_B = "RB2B"
 
 
 class ExternalQueryErrorCode(StrEnum):
