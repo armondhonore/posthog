@@ -260,9 +260,9 @@ describe('FunnelLineChart', () => {
 
             await screen.findByRole('img', { name: /chart with/i })
             const legend = await screen.findByTestId('funnel-line-legend')
-            const swatchColors = Array.from(legend.querySelectorAll<HTMLElement>('span[style]')).map(
-                (el) => el.style.backgroundColor
-            )
+            const swatchColors = Array.from(legend.querySelectorAll<HTMLElement>('span[style]'))
+                .map((el) => el.style.backgroundColor)
+                .filter(Boolean)
             expect(swatchColors).toHaveLength(2)
             expect(new Set(swatchColors).size).toBe(2)
         })

@@ -101,6 +101,7 @@ export function InsightDisplayConfig(): JSX.Element {
         trendsFilter,
         hasLegend,
         showLegend,
+        usesInChartLegend,
         supportsValueOnSeries,
         showPercentStackView,
         supportsPercentStackView,
@@ -162,8 +163,9 @@ export function InsightDisplayConfig(): JSX.Element {
     const isLineGraph = isLineDisplay && !isCumulativeLineDisplay
     const isLinearScale = !yAxisScaleType || yAxisScaleType === 'linear'
     // The in-chart quill legend supports placement, so it gets a single "Legend" select
-    // (Hide + position) instead of the legacy show/hide checkbox.
-    const useQuillLegendOptions = quillLegendEnabled && isTrends && isLineDisplay
+    // (Hide + position) instead of the legacy show/hide checkbox. `usesInChartLegend` covers
+    // trends/stickiness/lifecycle; funnel trends draw their own in-chart legend too.
+    const useQuillLegendOptions = usesInChartLegend || (quillLegendEnabled && showFunnelLegendConfig)
 
     const {
         showValuesOnSeries,

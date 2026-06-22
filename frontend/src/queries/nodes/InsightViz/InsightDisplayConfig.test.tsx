@@ -11,7 +11,13 @@ import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
 import { useMocks } from '~/mocks/jest'
-import { NodeKind, TrendsQuery } from '~/queries/schema/schema-general'
+import {
+    InsightQueryNode,
+    LifecycleQuery,
+    NodeKind,
+    StickinessQuery,
+    TrendsQuery,
+} from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
 import { BaseMathType, ChartDisplayType, InsightShortId } from '~/types'
 
@@ -38,6 +44,31 @@ function makeTrendsQuery(
             display,
             ...trendsFilter,
         },
+    }
+}
+
+const pageviewSeries = [
+    {
+        kind: NodeKind.EventsNode,
+        name: '$pageview',
+        event: '$pageview',
+        math: BaseMathType.TotalCount,
+    },
+] as TrendsQuery['series']
+
+function makeStickinessQuery(display?: ChartDisplayType): StickinessQuery {
+    return {
+        kind: NodeKind.StickinessQuery,
+        series: pageviewSeries,
+        stickinessFilter: { display },
+    }
+}
+
+function makeLifecycleQuery(): LifecycleQuery {
+    return {
+        kind: NodeKind.LifecycleQuery,
+        series: pageviewSeries,
+        lifecycleFilter: { showLegend: true },
     }
 }
 
@@ -68,7 +99,7 @@ describe('InsightDisplayConfig', () => {
         cleanup()
     })
 
-    function setupAndRender(query: TrendsQuery): void {
+    function setupAndRender(query: InsightQueryNode): void {
         insightLogic(insightProps).mount()
         insightDataLogic(insightProps).mount()
         const vizDataLogic = insightVizDataLogic(insightProps)
@@ -192,6 +223,30 @@ describe('InsightDisplayConfig', () => {
             const legendItem = getDisplaySectionItems().find((item) => item.includes('Show legend'))
             expect(legendItem).toBeTruthy()
             expect(legendItem).toContain('Bottom')
+        })
+
+        it.each([
+            ['trends bar', () => makeTrendsQuery(ChartDisplayType.ActionsBar)],
+            ['trends unstacked bar', () => makeTrendsQuery(ChartDisplayType.ActionsUnstackedBar)],
+            ['stickiness line', () => makeStickinessQuery(ChartDisplayType.ActionsLineGraph)],
+            ['stickiness bar', () => makeStickinessQuery(ChartDisplayType.ActionsBar)],
+            ['lifecycle', () => makeLifecycleQuery()],
+        ])('adds the legend position select for %s', async (_desc, makeQuery) => {
+            setupAndRender(makeQuery())
+            await openOptionsMenu()
+
+            const legendItem = getDisplaySectionItems().find((item) => item.includes('Show legend'))
+            expect(legendItem).toBeTruthy()
+            expect(legendItem).toContain('Bottom')
+        })
+
+        it('keeps the plain "Show legend" checkbox for the aggregated bar-value chart', async () => {
+            setupAndRender(makeTrendsQuery(ChartDisplayType.ActionsBarValue))
+            await openOptionsMenu()
+
+            // The aggregated bar-value layout has no in-chart legend, so it must not get a position select.
+            const items = getDisplaySectionItems()
+            expect(items.some((item) => item.includes('Bottom'))).toBe(false)
         })
     })
 })
