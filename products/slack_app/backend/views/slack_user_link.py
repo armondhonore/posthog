@@ -85,8 +85,13 @@ def slack_user_link_authorize(request: HttpRequest) -> HttpResponse:
 
     posthog_team_id = invite.get("posthog_team_id")
     slack_team_id = invite.get("slack_team_id")
-    slack_user_id = invite.get("slack_user_id")
-    if not isinstance(posthog_team_id, int) or not isinstance(slack_team_id, str) or not isinstance(slack_user_id, str):
+    # `slack_user_id` is only present on Slack-DM-initiated invites (we knew
+    # who triggered the failure). Settings-initiated invites omit it because
+    # the user hasn't authenticated to Slack yet — we'll learn their identity
+    # only after the OAuth callback.
+    slack_user_id_raw = invite.get("slack_user_id")
+    slack_user_id = slack_user_id_raw if isinstance(slack_user_id_raw, str) else None
+    if not isinstance(posthog_team_id, int) or not isinstance(slack_team_id, str):
         return render(request, "slack_user_link/error.html", {"reason": "Invalid link."}, status=400)
 
     workspace_integration = _load_workspace_integration(posthog_team_id, slack_team_id)
@@ -101,16 +106,16 @@ def slack_user_link_authorize(request: HttpRequest) -> HttpResponse:
     if not link_feature_enabled(workspace_integration, slack_team_id):
         return HttpResponseNotFound()
 
-    callback_state = build_callback_state(
-        {
-            "slack_user_id": slack_user_id,
-            "slack_team_id": slack_team_id,
-            "posthog_team_id": posthog_team_id,
-            "posthog_user_id": request.user.id,
-            "channel": invite.get("channel"),
-            "thread_ts": invite.get("thread_ts"),
-        }
-    )
+    callback_state_payload: dict[str, Any] = {
+        "slack_team_id": slack_team_id,
+        "posthog_team_id": posthog_team_id,
+        "posthog_user_id": request.user.id,
+        "channel": invite.get("channel"),
+        "thread_ts": invite.get("thread_ts"),
+    }
+    if slack_user_id is not None:
+        callback_state_payload["slack_user_id"] = slack_user_id
+    callback_state = build_callback_state(callback_state_payload)
 
     try:
         authorize_url = build_authorize_url(redirect_uri=_callback_redirect_uri(), state=callback_state)

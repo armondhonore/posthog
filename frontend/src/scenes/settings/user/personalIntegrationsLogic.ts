@@ -33,6 +33,10 @@ interface GithubStartResponse {
     install_url: string
 }
 
+interface SlackStartResponse {
+    install_url: string
+}
+
 /** Key for stashing the ``connect_from`` URL param across the GitHub install roundtrip.
  *
  * The install flow leaves posthog.com for github.com and comes back, which drops the query
@@ -97,6 +101,29 @@ export const personalIntegrationsLogic = kea<personalIntegrationsLogicType>([
                         'api/users/@me/integrations/slack/'
                     )
                     return response.results
+                },
+            },
+        ],
+        // Trades a manual action+reducer pair for `connectSlack` (auto-defined
+        // by the loader) plus `slackConnectLoading` (kea-loaders convention),
+        // which the button reads for its spinner. The return value is unused;
+        // success takes the tab off this page via window.location.
+        slackConnect: [
+            false as boolean,
+            {
+                connectSlack: async () => {
+                    try {
+                        const response = await api.create<SlackStartResponse>(
+                            'api/users/@me/integrations/slack/start/',
+                            {}
+                        )
+                        window.location.href = response.install_url
+                        return true
+                    } catch (error: unknown) {
+                        const message = error instanceof Error && 'detail' in error ? (error as any).detail : undefined
+                        lemonToast.error(message || 'Could not start Slack linking.')
+                        return false
+                    }
                 },
             },
         ],

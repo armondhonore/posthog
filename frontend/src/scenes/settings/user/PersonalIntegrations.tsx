@@ -76,7 +76,7 @@ function GitHubInstallationRow({ integration }: { integration: PersonalGitHubInt
                 </div>
                 <div className="mt-1">
                     <GitHubRepoSummary
-                        repoNames={repositories.map((r) => r.name)}
+                        repoNames={repositories.map((r: { name: string }) => r.name)}
                         loading={repositoriesLoading}
                         installationId={installationId}
                         accountType={accountType}
@@ -158,9 +158,8 @@ function SlackLinkRow({ integration }: { integration: PersonalSlackIntegration }
     )
 }
 
-export function PersonalIntegrations(): JSX.Element {
-    const { integrations, integrationsLoading, slackIntegrations, slackIntegrationsLoading, slackLinkEnabled } =
-        useValues(personalIntegrationsLogic)
+export function PersonalGitHubIntegrations(): JSX.Element {
+    const { integrations, integrationsLoading } = useValues(personalIntegrationsLogic)
     const { connectGitHub } = useActions(personalIntegrationsLogic)
 
     if (integrationsLoading && integrations.length === 0) {
@@ -172,55 +171,83 @@ export function PersonalIntegrations(): JSX.Element {
     }
 
     return (
-        <div className="deprecated-space-y-3">
-            <div className="divide-y rounded border bg-surface-primary">
-                {integrations.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-sm text-secondary">
-                        <IconGithub className="text-3xl mb-2 opacity-40" />
-                        <p className="mb-1">No GitHub installations connected yet</p>
-                        <p className="text-xs text-muted text-balance">
-                            Connect to let PostHog access your repos, attribute commits, open pull requests, and assign
-                            issues as you. You can add multiple installations for different accounts or organizations.
-                        </p>
-                    </div>
-                ) : (
-                    integrations.map((integration) => (
-                        <GitHubInstallationRow key={integration.installation_id} integration={integration} />
-                    ))
-                )}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-                    <LemonButton type="secondary" size="small" icon={<IconPlus />} onClick={connectGitHub}>
-                        {integrations.length === 0 ? 'Connect GitHub' : 'Add account/organization'}
-                    </LemonButton>
-                    <span className="text-xs text-secondary text-balance">
-                        Heads up: if GitHub's <strong>Save</strong> button is disabled at the end of the flow, flip
-                        between <strong>All repositories</strong> and <strong>Only select repositories</strong> to
-                        proceed.
-                    </span>
+        <div className="divide-y rounded border bg-surface-primary">
+            {integrations.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-secondary">
+                    <IconGithub className="text-3xl mb-2 opacity-40" />
+                    <p className="mb-1">No GitHub installations connected yet</p>
+                    <p className="text-xs text-muted text-balance">
+                        Connect to let PostHog access your repos, attribute commits, open pull requests, and assign
+                        issues as you. You can add multiple installations for different accounts or organizations.
+                    </p>
                 </div>
-            </div>
-
-            {slackLinkEnabled && (
-                <div className="divide-y rounded border bg-surface-primary">
-                    {slackIntegrationsLoading && slackIntegrations.length === 0 ? (
-                        <LemonSkeleton className="h-16 w-full" />
-                    ) : slackIntegrations.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-sm text-secondary">
-                            <IconSlack className="text-3xl mb-2 opacity-40" />
-                            <p className="mb-1">No Slack account linked</p>
-                            <p className="text-xs text-muted text-balance">
-                                To link your Slack account, mention <strong>@PostHog</strong> in a Slack channel
-                                connected to PostHog. If your Slack email doesn't match any PostHog account, the bot
-                                will offer a "Link my PostHog account" button — that's the entry point.
-                            </p>
-                        </div>
-                    ) : (
-                        slackIntegrations.map((integration) => (
-                            <SlackLinkRow key={integration.id} integration={integration} />
-                        ))
-                    )}
-                </div>
+            ) : (
+                integrations.map((integration: PersonalGitHubIntegration) => (
+                    <GitHubInstallationRow key={integration.installation_id} integration={integration} />
+                ))
             )}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                <LemonButton type="secondary" size="small" icon={<IconPlus />} onClick={connectGitHub}>
+                    {integrations.length === 0 ? 'Connect GitHub' : 'Add account/organization'}
+                </LemonButton>
+                <span className="text-xs text-secondary text-balance">
+                    Heads up: if GitHub's <strong>Save</strong> button is disabled at the end of the flow, flip between{' '}
+                    <strong>All repositories</strong> and <strong>Only select repositories</strong> to proceed.
+                </span>
+            </div>
+        </div>
+    )
+}
+
+export function PersonalSlackIntegrations(): JSX.Element {
+    const { slackIntegrations, slackIntegrationsLoading, slackLinkEnabled, slackConnectLoading } =
+        useValues(personalIntegrationsLogic)
+    const { connectSlack } = useActions(personalIntegrationsLogic)
+
+    // When the feature flag is off we hide the entire section, including any
+    // pre-existing rows — the unlink endpoint stays reachable so support can
+    // walk a user through unlinking via the API directly during a rollback.
+    if (!slackLinkEnabled) {
+        return (
+            <div className="px-4 py-6 text-center text-sm text-secondary">
+                Slack identity linking isn't enabled for your organization yet.
+            </div>
+        )
+    }
+
+    return (
+        <div className="divide-y rounded border bg-surface-primary">
+            {slackIntegrationsLoading && slackIntegrations.length === 0 ? (
+                <LemonSkeleton className="h-16 w-full" />
+            ) : slackIntegrations.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-secondary">
+                    <IconSlack className="text-3xl mb-2 opacity-40" />
+                    <p className="mb-1">No Slack account linked</p>
+                    <p className="text-xs text-muted text-balance">
+                        Link your Slack identity so @PostHog mentions route to you even when your Slack email and
+                        PostHog email don't match.
+                    </p>
+                </div>
+            ) : (
+                slackIntegrations.map((integration: PersonalSlackIntegration) => (
+                    <SlackLinkRow key={integration.id} integration={integration} />
+                ))
+            )}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                <LemonButton
+                    type="secondary"
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={connectSlack}
+                    loading={slackConnectLoading}
+                >
+                    {slackIntegrations.length === 0 ? 'Link my Slack account' : 'Link another workspace'}
+                </LemonButton>
+                <span className="text-xs text-secondary text-balance">
+                    You'll be redirected to Slack to authorize this PostHog account. The link binds your Slack user id
+                    to your PostHog account — no Slack token is kept after the redirect.
+                </span>
+            </div>
         </div>
     )
 }

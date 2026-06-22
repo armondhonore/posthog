@@ -137,6 +137,20 @@ class UserSlackIntegrationListResponseSerializer(serializers.Serializer):
     )
 
 
+class UserSlackLinkStartRequestSerializer(serializers.Serializer):
+    team_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Optional team/project id to link against; defaults to the user's current team.",
+    )
+
+
+class UserSlackLinkStartResponseSerializer(serializers.Serializer):
+    install_url = serializers.CharField(
+        help_text="URL to open in the browser to start the Sign-in-with-Slack flow.",
+    )
+
+
 @extend_schema(extensions={"x-product": "core"})
 class UserIntegrationViewSet(viewsets.GenericViewSet):
     """`/api/users/@me/integrations/` — manage the user's personal GitHub integrations."""
@@ -153,6 +167,7 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
         "github_start",
         "github_destroy",
         "github_repos_refresh",
+        "slack_start",
         "slack_destroy",
     ]
 
@@ -403,10 +418,63 @@ class UserIntegrationViewSet(viewsets.GenericViewSet):
         return Response({"results": [_serialize_slack_integration(integration) for integration in integrations]})
 
     @extend_schema(
+        summary="Start Slack identity link from settings",
+        request=UserSlackLinkStartRequestSerializer,
+        responses={200: UserSlackLinkStartResponseSerializer},
+    )
+    @action(methods=["POST"], detail=False, url_path="slack/start", throttle_classes=[UserAuthenticationThrottle])
+    def slack_start(self, request: Request, **_kwargs) -> Response:
+        """Mint a Sign-in-with-Slack invite URL initiated from settings, without
+        Slack-DM context. The returned URL takes the user through PostHog login
+        (already satisfied here), then to Slack OAuth, then back to our callback
+        which writes the ``UserIntegration`` row.
+
+        Resolves the target Slack workspace from the user's ``team_id`` body
+        param (or ``current_team`` when omitted, mirroring ``github_start``).
+        Refuses if the target team has no Slack workspace connected, if the
+        feature flag is off for the workspace, or if the user is already linked
+        to this workspace.
+        """
+        from products.slack_app.backend.services.slack_user_link import build_invite_url, link_feature_enabled
+
+        user = self._get_user()
+        team = _resolve_team_for_github_start(user, request)
+        if team is None:
+            raise exceptions.ValidationError("No team available for this user.")
+
+        workspace = Integration.objects.filter(team=team, kind="slack").first()
+        if workspace is None:
+            raise exceptions.ValidationError(
+                "This project has no Slack workspace connected. Ask an admin to install the Slack app first."
+            )
+
+        if not link_feature_enabled(workspace, workspace.integration_id):
+            raise exceptions.PermissionDenied("Slack identity linking is not enabled for this organization.")
+
+        if UserIntegration.objects.filter(
+            user=user,
+            kind=UserIntegration.IntegrationKind.SLACK,
+            config__slack_team_id=workspace.integration_id,
+        ).exists():
+            raise exceptions.ValidationError("You're already linked to this Slack workspace.")
+
+        install_url = build_invite_url(
+            slack_user_id=None,
+            slack_team_id=workspace.integration_id,
+            posthog_team_id=team.id,
+            channel=None,
+            thread_ts=None,
+        )
+        return Response({"install_url": install_url})
+
+    @extend_schema(
         summary="Unlink a Slack identity",
         responses={204: OpenApiResponse(description="Slack link removed.")},
     )
-    @action(methods=["DELETE"], detail=False, url_path=r"slack/(?P<slack_user_id>[^/]+)")
+    # Restrict the slack_user_id capture to Slack's real id format ("U..." for
+    # human users, "W..." for Enterprise Grid). A looser regex would shadow
+    # sibling actions like ``slack/start`` and return 405 on their POSTs.
+    @action(methods=["DELETE"], detail=False, url_path=r"slack/(?P<slack_user_id>[UW][A-Z0-9]+)")
     def slack_destroy(self, request: Request, slack_user_id: str, **_kwargs) -> Response:
         """Remove a Slack identity link by Slack user id. Idempotent and
         flag-agnostic — users must always be able to unlink even after the

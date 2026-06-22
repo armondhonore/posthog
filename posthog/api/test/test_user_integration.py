@@ -1,4 +1,5 @@
 import time
+from typing import Any
 
 from posthog.test.base import APIBaseTest
 from unittest.mock import MagicMock, patch
@@ -1053,3 +1054,44 @@ class TestUserIntegrationSlackEndpoints(APIBaseTest):
                 user=other, kind=UserIntegration.IntegrationKind.SLACK, integration_id="U-OTHER"
             ).exists()
         )
+
+    def _enable_flag(self) -> Any:
+        return patch("products.slack_app.backend.services.slack_user_link.link_feature_enabled", return_value=True)
+
+    def _seed_workspace_integration(self) -> Integration:
+        return Integration.objects.create(
+            team=self.team,
+            kind="slack",
+            integration_id="T12345",
+            sensitive_config={"access_token": "xoxb-test"},
+        )
+
+    def test_slack_start_returns_install_url_when_workspace_connected(self):
+        self._seed_workspace_integration()
+        with self._enable_flag():
+            response = self.client.post("/api/users/@me/integrations/slack/start/", data={}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        install_url = response.json()["install_url"]
+        # Routes through the same backend authorize entry — settings is just
+        # another invite origin, not a separate OAuth flow.
+        self.assertIn("/complete/slack-link/start/?state=", install_url)
+
+    def test_slack_start_fails_when_no_workspace_integration(self):
+        with self._enable_flag():
+            response = self.client.post("/api/users/@me/integrations/slack/start/", data={}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("no Slack workspace", response.json()["detail"])
+
+    def test_slack_start_fails_when_already_linked(self):
+        self._seed_workspace_integration()
+        _create_slack_user_integration(self.user, slack_team_id="T12345")
+        with self._enable_flag():
+            response = self.client.post("/api/users/@me/integrations/slack/start/", data={}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already linked", response.json()["detail"])
+
+    def test_slack_start_403_when_flag_off(self):
+        self._seed_workspace_integration()
+        with patch("products.slack_app.backend.services.slack_user_link.link_feature_enabled", return_value=False):
+            response = self.client.post("/api/users/@me/integrations/slack/start/", data={}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

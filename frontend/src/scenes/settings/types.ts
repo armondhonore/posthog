@@ -208,6 +208,8 @@ export type SettingId =
     | 'person-last-seen-at'
     | 'personal-api-keys'
     | 'personal-integrations'
+    | 'personal-integrations-github'
+    | 'personal-integrations-slack'
     | 'persons-join-mode'
     | 'reminders'
     | 'persons-on-events'

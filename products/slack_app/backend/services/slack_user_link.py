@@ -119,23 +119,31 @@ def find_linked_posthog_user(
 
 def build_invite_token(
     *,
-    slack_user_id: str,
+    slack_user_id: str | None,
     slack_team_id: str,
     posthog_team_id: int,
     channel: str | None,
     thread_ts: str | None,
 ) -> str:
-    """Sign the Slack-side context the user carries from the DM button to the
-    authorize view. ``posthog_team_id`` pins which workspace ``Integration``
-    we'll attach the link to on callback — so a user clicking an old invite
-    after the integration was removed gets a clean error rather than a
-    cross-workspace bind.
+    """Sign the Slack-side context the user carries to the authorize view.
+
+    ``slack_user_id`` is known on the Slack-DM invite path (we got the event
+    that failed to match) and unknown on the settings-initiated path (the user
+    is just clicking "Link my Slack account"). When omitted, the callback
+    cannot run the divergence check, so the OAuth identity is trusted
+    end-to-end and pinned only by ``slack_team_id``.
+
+    ``posthog_team_id`` pins which workspace ``Integration`` we'll attach the
+    link to on callback — so a user clicking an old invite after the
+    integration was removed gets a clean error rather than a cross-workspace
+    bind.
     """
     payload: dict[str, Any] = {
-        "slack_user_id": slack_user_id,
         "slack_team_id": slack_team_id,
         "posthog_team_id": posthog_team_id,
     }
+    if slack_user_id:
+        payload["slack_user_id"] = slack_user_id
     if channel:
         payload["channel"] = channel
     if thread_ts:
@@ -159,7 +167,7 @@ def decode_invite_token(token: str) -> dict[str, Any] | None:
 
 def build_invite_url(
     *,
-    slack_user_id: str,
+    slack_user_id: str | None,
     slack_team_id: str,
     posthog_team_id: int,
     channel: str | None,
