@@ -26040,6 +26040,7 @@ export namespace Schemas {
        * * `google-search-console` - Google Search Console
        * * `google-sheets` - Google Sheets
        * * `hubspot` - Hubspot
+       * * `instagram` - Instagram
        * * `intercom` - Intercom
        * * `jira` - Jira
        * * `linear` - Linear
