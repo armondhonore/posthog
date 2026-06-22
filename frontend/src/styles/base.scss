@@ -1619,24 +1619,40 @@
             }
         }
 
-        // Only use this class in visual regression tests
+        // Only use this class in visual regression tests.
+        //
+        // A 0ms animation-duration is supposed to snap every animation to its final
+        // keyframe via forwards fill, but headless Chromium in CI handles a
+        // zero-duration animation's fill inconsistently and can paint the 0% keyframe
+        // instead — collapsing entrance animations to their start state (opacity 0,
+        // width 0, etc.), which blanks faded-in content and width-expanded markers in
+        // snapshots. Give every animation a tiny real duration plus a negative delay so
+        // it is deterministically in its finished (after) phase at every frame, and
+        // forwards holds the 100% keyframe.
         *,
         *::before,
         *::after {
+            transition-delay: 0ms !important;
             transition-duration: 0ms !important;
-            animation-fill-mode: forwards !important;
-            animation-duration: 0ms !important;
+            animation-duration: 1ms !important;
+            animation-delay: -1ms !important;
             animation-iteration-count: 1 !important;
+            animation-fill-mode: forwards !important;
         }
 
-        // Fade animates content in from opacity 0. The animation-duration:0ms +
-        // animation-fill-mode:forwards override above lands on opacity 1 in local
-        // Chromium, but headless Chromium in CI handles a zero-duration animation's
-        // fill inconsistently and can paint the 0% keyframe instead — leaving
-        // faded-in content invisible in snapshots. Pin the end (visible) state
-        // directly; as an !important author rule it overrides the animation regardless.
+        // Belt-and-suspenders for the two entrance animations whose final layout only
+        // exists via the animation's forwards fill (so a misfired fill doesn't just dim
+        // them, it collapses them): pin the end state directly. As !important author
+        // rules these override the animation regardless of how the frame settles.
         .fade-component-container {
+            // Fade animates opacity 0 -> 1.
             opacity: 1 !important;
+        }
+
+        .BillingGaugeItem {
+            // BillingGaugeItem animates width 0 -> --billing-gauge-item-width, which
+            // positions its marker/label along the gauge bar.
+            width: var(--billing-gauge-item-width) !important;
         }
 
         // Hide hogfetti (JS-driven confetti animation) — Math.random + requestAnimationFrame
