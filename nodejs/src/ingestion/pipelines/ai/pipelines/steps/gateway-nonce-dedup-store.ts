@@ -2,9 +2,8 @@ import { GatewayNonceOutcome, GatewayNonceStore } from '~/ingestion/common/ai-su
 import { RedisPool } from '~/types'
 import { logger } from '~/utils/logger'
 
-// Single-use nonce store backing gateway provenance replay protection. A valid,
-// fresh signature is only honored once per (token, request_id); a second event
-// reusing the same signed tuple within the freshness window is a replay.
+// Honors a signed tuple once per (token, request_id); a reuse within the
+// freshness window is a replay.
 export class RedisGatewayNonceStore implements GatewayNonceStore {
     constructor(private readonly redisPool: RedisPool) {}
 

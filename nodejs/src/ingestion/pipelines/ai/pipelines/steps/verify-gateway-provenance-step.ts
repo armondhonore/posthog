@@ -78,11 +78,8 @@ export function createVerifyGatewayProvenanceStep<TInput extends VerifyGatewayPr
     }
 }
 
-// isReplay records the signed request_id as a single-use nonce and reports
-// whether it has been seen before. A store outage fails open (treated as a
-// first sighting) so a Redis blip can't strip the marker off legitimate
-// gateway events. token scopes the nonce; it is a verified string by the time
-// a trusted signature reaches here.
+// Records the request_id nonce and reports a reuse; a store outage returns
+// false (fail open). token scopes the nonce across projects.
 async function isReplay(
     dedupStore: GatewayNonceStore | undefined,
     token: string | undefined,
