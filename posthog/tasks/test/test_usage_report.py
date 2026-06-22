@@ -5401,10 +5401,20 @@ class TestQuerySplitting(ClickhouseDestroyTablesMixin, ClickhouseTestMixin, Test
                 timestamp=self.begin + relativedelta(hours=i + 1),
                 properties={"$ai_model": "claude-3", "$ai_gateway_verified": True},
             )
+        # Client-forged $ai_gateway without the ingestion-verified marker: still
+        # counted, since the filter keys only on $ai_gateway_verified (which a
+        # client can't set — ingestion strips $ai_gateway* and stamps it).
+        _create_event(
+            event="$ai_generation",
+            team=self.team,
+            distinct_id="forged_gateway_user",
+            timestamp=self.begin + relativedelta(hours=1),
+            properties={"$ai_model": "claude-3", "$ai_gateway": True},
+        )
         flush_persons_and_events()
 
         ai_result = get_teams_with_ai_event_count_in_period(self.begin, self.end)
-        self.assertEqual(ai_result[0][1], baseline_count + 3)
+        self.assertEqual(ai_result[0][1], baseline_count + 4)
 
     def test_conversations_events_excluded_from_billable_count(self) -> None:
         """Test that Conversations widget events are excluded from billable event counts."""
