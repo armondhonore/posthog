@@ -2,6 +2,9 @@ from datetime import datetime
 
 from posthog.test.base import BaseTest
 
+from parameterized import parameterized
+
+from posthog.hogql import ast
 from posthog.hogql.errors import QueryError, ResolutionError
 from posthog.hogql.escape_sql import (
     escape_clickhouse_identifier,
@@ -10,6 +13,7 @@ from posthog.hogql.escape_sql import (
     escape_hogql_string,
     escape_postgres_identifier,
 )
+from posthog.hogql.parser import parse_expr
 
 from posthog.models.utils import UUIDT
 
@@ -25,7 +29,7 @@ class TestPrintString(BaseTest):
         self.assertEqual(escape_hogql_identifier("a.b.c"), "`a.b.c`")
         self.assertEqual(escape_hogql_identifier("a-b-c"), "`a-b-c`")
         self.assertEqual(escape_hogql_identifier("a#$#"), "`a#$#`")
-        self.assertEqual(escape_hogql_identifier("back`tick"), "`back\\`tick`")
+        self.assertEqual(escape_hogql_identifier("back`tick"), "`back``tick`")
         self.assertEqual(escape_hogql_identifier("single'quote"), "`single'quote`")
         self.assertEqual(escape_hogql_identifier('double"quote'), '`double"quote`')
         self.assertEqual(
@@ -43,13 +47,42 @@ class TestPrintString(BaseTest):
         self.assertEqual(escape_clickhouse_identifier("a.b.c"), "`a.b.c`")
         self.assertEqual(escape_clickhouse_identifier("a-b-c"), "`a-b-c`")
         self.assertEqual(escape_clickhouse_identifier("a#$#"), "`a#$#`")
-        self.assertEqual(escape_clickhouse_identifier("back`tick"), "`back\\`tick`")
+        self.assertEqual(escape_clickhouse_identifier("back`tick"), "`back``tick`")
         self.assertEqual(escape_clickhouse_identifier("single'quote"), "`single'quote`")
         self.assertEqual(escape_clickhouse_identifier('double"quote'), '`double"quote`')
         self.assertEqual(
             escape_clickhouse_identifier("other escapes: \b \f \n \t \0 \a \v \\"),
             "`other escapes: \\b \\f \\n \\t \\0 \\a \\v \\\\`",
         )
+
+    @parameterized.expand(
+        [
+            (f"{label}-{backend}", escape_fn, backend)
+            for label, escape_fn in [("hogql", escape_hogql_identifier), ("clickhouse", escape_clickhouse_identifier)]
+            for backend in ["rust-py", "cpp-json"]
+        ]
+    )
+    def test_identifier_roundtrips_through_production_parser(self, _name, escape_fn, backend):
+        # Escaped identifiers must parse back to the original chain through the real
+        # parser, not just the lenient parse_string_literal_text unescaper. Backtick
+        # cases are the regression guard: doubled `` parses, backslash-escaped \` does not.
+        samples = [
+            "back`tick",
+            "a``b",
+            "`leading",
+            "trailing`",
+            "``",
+            "a\\b",
+            "a\\`b",
+            "`a\\`b`",
+            "with space",
+            "a.b.c",
+        ]
+        for s in samples:
+            escaped = escape_fn(s)
+            node = parse_expr(escaped, backend=backend)
+            assert isinstance(node, ast.Field), f"{s!r} escaped to {escaped!r} did not parse to a Field"
+            self.assertEqual(node.chain, [s], f"{s!r} escaped to {escaped!r} did not round-trip")
 
     def test_sanitize_postgres_identifier(self):
         self.assertEqual(escape_postgres_identifier("a"), "a")

@@ -22,7 +22,8 @@ escape_chars_map = {
     "\\": "\\\\",
 }
 singlequote_escape_chars_map = {**escape_chars_map, "'": "\\'"}
-backquote_escape_chars_map = {**escape_chars_map, "`": "\\`"}
+# Backtick is doubled (`` ``), not backslash-escaped (`` \` ``): the production HogQL/ClickHouse parsers only accept the doubled form inside a quoted identifier, so doubling is what round-trips.
+backquote_escape_chars_map = {**escape_chars_map, "`": "``"}
 
 
 def safe_identifier(identifier: str) -> str:
