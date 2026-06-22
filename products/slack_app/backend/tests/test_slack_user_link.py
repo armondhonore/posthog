@@ -424,7 +424,7 @@ class TestAuthorizeView:
             channel=None,
             thread_ts=None,
         )
-        with patch("products.slack_app.backend.slack_user_link_views.link_feature_enabled", return_value=False):
+        with patch("products.slack_app.backend.views.slack_user_link.link_feature_enabled", return_value=False):
             response = client.get(f"/complete/slack-link/start/?state={token}")
         assert response.status_code == 404
 
@@ -438,7 +438,7 @@ class TestAuthorizeView:
             thread_ts="1.2",
         )
         with (
-            patch("products.slack_app.backend.slack_user_link_views.link_feature_enabled", return_value=True),
+            patch("products.slack_app.backend.views.slack_user_link.link_feature_enabled", return_value=True),
             patch(
                 "products.slack_app.backend.services.slack_user_oauth.get_instance_settings",
                 return_value={"SLACK_APP_CLIENT_ID": "cid", "SLACK_APP_CLIENT_SECRET": "csecret"},
@@ -504,8 +504,8 @@ class TestCallbackView:
             slack_email="dev@slack.example",
         )
         with (
-            patch("products.slack_app.backend.slack_user_link_views.link_feature_enabled", return_value=True),
-            patch("products.slack_app.backend.slack_user_link_views.exchange_code", return_value=identity),
+            patch("products.slack_app.backend.views.slack_user_link.link_feature_enabled", return_value=True),
+            patch("products.slack_app.backend.views.slack_user_link.exchange_code", return_value=identity),
             patch("posthog.models.integration.WebClient"),
         ):
             response = client.get(f"/complete/slack-link/?code=abc&state={state}")
@@ -528,8 +528,8 @@ class TestCallbackView:
             slack_email=None,
         )
         with (
-            patch("products.slack_app.backend.slack_user_link_views.link_feature_enabled", return_value=True),
-            patch("products.slack_app.backend.slack_user_link_views.exchange_code", return_value=identity),
+            patch("products.slack_app.backend.views.slack_user_link.link_feature_enabled", return_value=True),
+            patch("products.slack_app.backend.views.slack_user_link.exchange_code", return_value=identity),
         ):
             response = client.get(f"/complete/slack-link/?code=abc&state={state}")
 
@@ -542,9 +542,9 @@ class TestCallbackView:
         state = self._state_for(user, workspace_integration.team_id)
 
         with (
-            patch("products.slack_app.backend.slack_user_link_views.link_feature_enabled", return_value=True),
+            patch("products.slack_app.backend.views.slack_user_link.link_feature_enabled", return_value=True),
             patch(
-                "products.slack_app.backend.slack_user_link_views.exchange_code",
+                "products.slack_app.backend.views.slack_user_link.exchange_code",
                 side_effect=SlackUserOAuthError("invalid_code"),
             ),
         ):

@@ -60,7 +60,7 @@ from products.slack_app.backend.api import (
     posthog_code_interactivity_handler,
     slack_workspace_claims_view,
 )
-from products.slack_app.backend.slack_user_link_views import slack_user_link_authorize, slack_user_link_callback
+from products.slack_app.backend.views import slack_user_link_authorize, slack_user_link_callback
 from products.surveys.backend.api.survey import public_survey_page
 from products.user_interviews.backend.presentation.webhooks import (
     start_call as user_interviews_start_call,
