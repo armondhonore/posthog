@@ -53,9 +53,12 @@ class SignalFinding(BaseModel):
         description=(
             "A mapping of 'git commit short SHA (7 characters)' -> 'reason'. "
             "Values are short explanations of WHY each commit is relevant. "
-            "Use `git blame` on the most critical code paths to identify commits that caused, or are most closely related to, "
-            "the issue described by this report. Prioritize causative commits "
-            "(e.g. the commit that introduced a bug) over general authorship commits. Include 1-5 commits."
+            "Use `git blame --ignore-revs-file .git-blame-ignore-revs` on the most critical code paths to identify "
+            "commits that caused, or are most closely related to, the issue described by this report. Prioritize causative "
+            "commits (e.g. the commit that introduced a bug) over general authorship commits. "
+            "Exclude commits authored by bots (any GitHub login ending in `[bot]`) and commits whose only relationship to "
+            "the code is a repo-wide mechanical change (linting, formatting, import sorting, bulk refactor) — those authors "
+            "didn't meaningfully shape this code and must not be surfaced as reviewers. Include 1-5 commits."
         ),
     )
     data_queried: str = Field(
@@ -314,7 +317,7 @@ _RESEARCH_PROTOCOL = """## Research protocol
 For each signal, find **code evidence** and **data evidence**:
 
 - **Code:** Trace the code path behind the signal's claim — find the relevant files, read the implementation, and understand how the logic actually works. Even if the signal doesn't mention specific files, search for the feature/component and dig in. Also look for `posthog.capture` calls or feature flag checks nearby — these show what the team tracks and gates, which helps gauge importance.
-- **Git blame:** Once you've identified the most critical code paths, run `git blame` on the key files/regions to find the commits most relevant to this signal. Prioritize causative commits (e.g. the commit that introduced a bug or changed behavior) over general authorship. If no causative commit is clear, include the commits that authored the bulk of the relevant code.
+- **Git blame:** Once you've identified the most critical code paths, run `git blame --ignore-revs-file .git-blame-ignore-revs` on the key files/regions to find the commits most relevant to this signal. The `--ignore-revs-file` flag skips blame-ignored mechanical commits so blame points at the real author instead of a bulk reformat. Prioritize causative commits (e.g. the commit that introduced a bug or changed behavior) over general authorship. If no causative commit is clear, include the commits that authored the bulk of the relevant code. Never include commits authored by bots (any GitHub login ending in `[bot]`), and never include commits whose only relationship to the code is a repo-wide mechanical change (linting, formatting, import sorting, bulk refactor) — those authors have no real context on this code and must not be surfaced as reviewers.
 - **Data:** Use PostHog MCP tools (`execute-sql`, `query-run`, `read-data-schema`, etc.) to check real impact — error rates, user counts, conversion metrics. If the signal references a specific insight, experiment, or feature flag, look it up directly.
 
 Cross-reference code and data — does the data corroborate what the code suggests?
