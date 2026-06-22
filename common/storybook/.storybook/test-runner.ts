@@ -403,8 +403,46 @@ async function takeSnapshotWithTheme(
     // final wait for any remaining renders
     await page.waitForTimeout(1000)
 
+    // Deterministically settle every animation on its final keyframe before snapshotting.
+    // The CSS override (animation-duration:0ms + forwards, see base.scss) is meant to do
+    // this, but headless Chromium in CI fills a zero-duration animation inconsistently and
+    // can paint the 0% keyframe — which collapses entrance animations whose final layout
+    // exists only via the fill (Fade -> opacity 0, BillingGauge/progress bars -> width 0),
+    // blanking content. finish() jumps each animation to its end, commitStyles() writes the
+    // exact end-keyframe values to inline style, and cancel() drops the mis-painting
+    // animation so the committed inline values win. Committing the exact end keyframe (not a
+    // re-timed frame) keeps it byte-identical to baselines, so unaffected stories don't drift.
+    await freezeAnimationsToEnd(page)
+
     // Do take the snapshot
     await doTakeSnapshotWithTheme(page, context, browser, theme, storyContext)
+}
+
+async function freezeAnimationsToEnd(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        for (const animation of document.getAnimations()) {
+            let finished = false
+            try {
+                animation.finish()
+                finished = true
+            } catch {
+                // Infinite/unfinishable animations can't be finished — leave them to the CSS override.
+            }
+            if (!finished) {
+                continue
+            }
+            try {
+                animation.commitStyles()
+            } catch {
+                // commitStyles throws for pseudo-element targets or non-committable props — skip.
+            }
+            try {
+                animation.cancel()
+            } catch {
+                // ignore
+            }
+        }
+    })
 }
 
 async function doTakeSnapshotWithTheme(
