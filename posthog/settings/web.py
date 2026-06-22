@@ -486,6 +486,7 @@ SPECTACULAR_SETTINGS = {
         "PropertyDefinitionTypeEnum": "products.event_definitions.backend.models.property_definition.PropertyType",
         "ExternalDataSourceTypeEnum": "products.data_warehouse.backend.types.ExternalDataSourceType",
         "ExperimentMetricKindEnum": "products.ai_observability.backend.models.score_definitions.ScoreDefinition.Kind",
+        "EvaluationTargetEnum": "products.ai_observability.backend.models.evaluations.EvaluationTarget",
         "IntegrationKindEnum": "posthog.models.integration.Integration.IntegrationKind",
         "TicketStatusEnum": "products.conversations.backend.models.constants.Status",
         "HealthIssueStatusEnum": "posthog.models.health_issue.HealthIssue.Status",

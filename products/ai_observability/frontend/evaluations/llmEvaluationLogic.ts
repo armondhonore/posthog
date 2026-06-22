@@ -35,6 +35,7 @@ import type {
     EvaluationRun,
     EvaluationSummary,
     EvaluationSummaryFilter,
+    EvaluationTarget,
     EvaluationType,
     HogEvaluation,
     LLMJudgeEvaluation,
@@ -42,6 +43,10 @@ import type {
     ModelConfiguration,
     SentimentEvaluation,
 } from './types'
+
+// Mirrors TRACE_EVAL_DEFAULT_WINDOW_SECONDS on the backend — the value pre-filled when an
+// evaluation is switched to the trace target. The backend re-defaults and clamps regardless.
+export const DEFAULT_TRACE_WINDOW_SECONDS = 30 * 60
 
 export const DEFAULT_HOG_SOURCE = `// Check that the output is not empty
 let result := length(output) > 0
@@ -125,6 +130,8 @@ export const llmEvaluationLogic = kea<llmEvaluationLogicType>([
         setTriggerConditions: (conditions: EvaluationConditionSet[]) => ({ conditions }),
         setModelConfiguration: (modelConfiguration: ModelConfiguration | null) => ({ modelConfiguration }),
         setEvaluationType: (evaluationType: EvaluationType) => ({ evaluationType }),
+        setEvaluationTarget: (target: EvaluationTarget) => ({ target }),
+        setTraceWindowSeconds: (windowSeconds: number) => ({ windowSeconds }),
         setHogSource: (source: string) => ({ source }),
 
         // Signal emission
@@ -299,6 +306,20 @@ export const llmEvaluationLogic = kea<llmEvaluationLogicType>([
                     }
                     return toLLMJudgeEvaluation(state)
                 },
+                setEvaluationTarget: (state, { target }) =>
+                    state
+                        ? {
+                              ...state,
+                              target,
+                              // Seed the window when switching to trace so the field shows a sane default;
+                              // clear the bag when switching back so we don't persist a stale window.
+                              target_config: target === 'trace' ? { window_seconds: DEFAULT_TRACE_WINDOW_SECONDS } : {},
+                          }
+                        : null,
+                setTraceWindowSeconds: (state, { windowSeconds }) =>
+                    state
+                        ? { ...state, target_config: { ...state.target_config, window_seconds: windowSeconds } }
+                        : null,
                 setHogSource: (state, { source }) =>
                     state && state.evaluation_type === 'hog'
                         ? { ...state, evaluation_config: { ...state.evaluation_config, source } }
@@ -369,6 +390,8 @@ export const llmEvaluationLogic = kea<llmEvaluationLogicType>([
                 setTriggerConditions: () => true,
                 setModelConfiguration: () => true,
                 setEvaluationType: () => true,
+                setEvaluationTarget: () => true,
+                setTraceWindowSeconds: () => true,
                 setHogSource: () => true,
                 saveEvaluationSuccess: () => false,
                 loadEvaluationSuccess: () => false,
@@ -450,6 +473,8 @@ export const llmEvaluationLogic = kea<llmEvaluationLogicType>([
                             properties: [],
                         },
                     ],
+                    target: 'generation' as const,
+                    target_config: {},
                     model_configuration: null,
                     total_runs: 0,
                     created_at: new Date().toISOString(),
@@ -540,6 +565,8 @@ export const llmEvaluationLogic = kea<llmEvaluationLogicType>([
                             properties: [],
                         },
                     ],
+                    target: 'generation',
+                    target_config: {},
                     model_configuration: null,
                     total_runs: 0,
                     created_at: new Date().toISOString(),

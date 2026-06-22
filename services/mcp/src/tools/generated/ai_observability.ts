@@ -173,6 +173,12 @@ const llmaEvaluationCreate = (): ToolBase<typeof LlmaEvaluationCreateSchema, Sch
         if (params.conditions !== undefined) {
             body['conditions'] = params.conditions
         }
+        if (params.target !== undefined) {
+            body['target'] = params.target
+        }
+        if (params.target_config !== undefined) {
+            body['target_config'] = params.target_config
+        }
         if (params.model_configuration !== undefined) {
             body['model_configuration'] = params.model_configuration
         }
@@ -593,6 +599,12 @@ const llmaEvaluationUpdate = (): ToolBase<typeof LlmaEvaluationUpdateSchema, Sch
         }
         if (params.conditions !== undefined) {
             body['conditions'] = params.conditions
+        }
+        if (params.target !== undefined) {
+            body['target'] = params.target
+        }
+        if (params.target_config !== undefined) {
+            body['target_config'] = params.target_config
         }
         if (params.model_configuration !== undefined) {
             body['model_configuration'] = params.model_configuration

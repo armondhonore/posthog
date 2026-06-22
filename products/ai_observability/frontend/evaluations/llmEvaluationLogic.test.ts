@@ -75,6 +75,8 @@ const mockEvaluation: EvaluationConfig = {
     output_type: 'boolean',
     output_config: { allows_na: false },
     conditions: [{ id: 'cond-1', rollout_percentage: 50, properties: [] }],
+    target: 'generation',
+    target_config: {},
     model_configuration: {
         provider: 'openai',
         model: 'gpt-5-mini',

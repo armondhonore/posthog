@@ -28,12 +28,16 @@ from posthog.temporal.ai_observability.run_evaluation import extract_event_io, r
 from ..feature_flags import is_sentiment_evaluations_enabled
 from ..models.evaluation_config import EvaluationConfig
 from ..models.evaluation_configs import (
+    TRACE_EVAL_DEFAULT_WINDOW_SECONDS,
+    TRACE_EVAL_MAX_WINDOW_SECONDS,
+    TRACE_EVAL_MIN_WINDOW_SECONDS,
     EvaluationType,
     OutputType,
     evaluation_supports_reports,
     evaluation_uses_model_configuration,
     get_evaluation_config_content_key,
     validate_evaluation_configs,
+    validate_target_config,
 )
 from ..models.evaluation_reports import EvaluationReport
 from ..models.evaluations import Evaluation
@@ -110,6 +114,29 @@ class _OutputConfigField(serializers.JSONField):
     pass
 
 
+@extend_schema_field(
+    {
+        "type": "object",
+        "properties": {
+            "window_seconds": {
+                "type": "integer",
+                "description": (
+                    "For 'trace' target: seconds to wait after the first matching generation before "
+                    "evaluating the whole trace. Captured when the run is scheduled — editing it does not "
+                    "change trace runs already in flight."
+                ),
+                "minimum": TRACE_EVAL_MIN_WINDOW_SECONDS,
+                "maximum": TRACE_EVAL_MAX_WINDOW_SECONDS,
+                "default": TRACE_EVAL_DEFAULT_WINDOW_SECONDS,
+            }
+        },
+        "additionalProperties": False,
+    }
+)
+class _TargetConfigField(serializers.JSONField):
+    pass
+
+
 class ModelConfigurationSerializer(serializers.Serializer):
     """Nested serializer for model configuration."""
 
@@ -163,6 +190,10 @@ class EvaluationSerializer(serializers.ModelSerializer):
         required=False,
         help_text="Output config. For 'boolean' output_type: {allows_na} to permit N/A results.",
     )
+    target_config = _TargetConfigField(
+        required=False,
+        help_text="Target-specific config. For 'trace' target: {window_seconds}. Empty for 'generation'.",
+    )
     conditions = EvaluationConditionSerializer(
         many=True,
         required=False,
@@ -187,6 +218,8 @@ class EvaluationSerializer(serializers.ModelSerializer):
             "output_type",
             "output_config",
             "conditions",
+            "target",
+            "target_config",
             "model_configuration",
             "created_at",
             "updated_at",
@@ -209,6 +242,15 @@ class EvaluationSerializer(serializers.ModelSerializer):
             "output_type": {
                 "help_text": (
                     "Output format. Use 'boolean' for pass/fail evaluations and 'sentiment' for sentiment analysis."
+                )
+            },
+            "target": {
+                "help_text": (
+                    "What the evaluation runs on. 'generation' evaluates each matching $ai_generation event "
+                    "individually. 'trace' evaluates the whole trace once: the first matching generation schedules "
+                    "a run that waits for the trace to settle, then evaluates all of its events together. "
+                    "Condition filters still match individual generations — a trace is evaluated when any of its "
+                    "generations matches, and sampling applies per trace."
                 )
             },
             "deleted": {"help_text": "Set to true to soft-delete the evaluation."},
@@ -254,6 +296,19 @@ class EvaluationSerializer(serializers.ModelSerializer):
                 )
             except ValueError as e:
                 raise serializers.ValidationError({"config": str(e)})
+
+        # Validate target_config against the effective target (request value, else the stored one).
+        # Surfaces a clean field error for an out-of-range window; the model's save() re-runs this
+        # so untouched requests still get normalized.
+        if "target" in data or "target_config" in data:
+            target = data.get("target") or getattr(self.instance, "target", None) or "generation"
+            config = data.get("target_config")
+            if config is None:
+                config = getattr(self.instance, "target_config", {})
+            try:
+                data["target_config"] = validate_target_config(target, config or {})
+            except ValueError as e:
+                raise serializers.ValidationError({"target_config": str(e)})
 
         # Guard re-enable transitions: if the eval is currently disabled and the caller is flipping
         # `enabled=True`, make sure whatever caused the disabled state has actually been resolved.

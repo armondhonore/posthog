@@ -87,6 +87,113 @@ class TestEvaluationConfigsApi(APIBaseTest):
         self.assertFalse(report.deleted)
         self.assertEqual(report.delivery_targets, [])
 
+    def test_target_defaults_to_generation(self):
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/evaluations/",
+            {
+                "name": "Default target",
+                "evaluation_type": "llm_judge",
+                "evaluation_config": {"prompt": "Test prompt"},
+                "output_type": "boolean",
+                "output_config": {},
+                "conditions": [{"id": "test-condition", "rollout_percentage": 50, "properties": []}],
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["target"], "generation")
+
+    def test_can_create_trace_target_evaluation(self):
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/evaluations/",
+            {
+                "name": "Trace target",
+                "evaluation_type": "llm_judge",
+                "evaluation_config": {"prompt": "Test prompt"},
+                "output_type": "boolean",
+                "output_config": {},
+                "conditions": [{"id": "test-condition", "rollout_percentage": 50, "properties": []}],
+                "target": "trace",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["target"], "trace")
+        evaluation = Evaluation.objects.get(name="Trace target")
+        self.assertEqual(evaluation.target, "trace")
+        # Window defaults when not provided.
+        self.assertEqual(evaluation.target_config, {"window_seconds": 30 * 60})
+
+    def test_trace_target_accepts_custom_window(self):
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/evaluations/",
+            {
+                "name": "Trace custom window",
+                "evaluation_type": "llm_judge",
+                "evaluation_config": {"prompt": "Test prompt"},
+                "output_type": "boolean",
+                "output_config": {},
+                "conditions": [{"id": "test-condition", "rollout_percentage": 50, "properties": []}],
+                "target": "trace",
+                "target_config": {"window_seconds": 120},
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["target_config"], {"window_seconds": 120})
+
+    def test_rejects_window_below_minimum(self):
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/evaluations/",
+            {
+                "name": "Trace tiny window",
+                "evaluation_type": "llm_judge",
+                "evaluation_config": {"prompt": "Test prompt"},
+                "output_type": "boolean",
+                "output_config": {},
+                "conditions": [{"id": "test-condition", "rollout_percentage": 50, "properties": []}],
+                "target": "trace",
+                "target_config": {"window_seconds": 5},
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["attr"], "target_config")
+
+    def test_generation_target_strips_window_config(self):
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/evaluations/",
+            {
+                "name": "Generation with stray config",
+                "evaluation_type": "llm_judge",
+                "evaluation_config": {"prompt": "Test prompt"},
+                "output_type": "boolean",
+                "output_config": {},
+                "conditions": [{"id": "test-condition", "rollout_percentage": 50, "properties": []}],
+                "target": "generation",
+                "target_config": {"window_seconds": 120},
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["target_config"], {})
+
+    def test_rejects_invalid_target(self):
+        response = self.client.post(
+            f"/api/environments/{self.team.id}/evaluations/",
+            {
+                "name": "Bad target",
+                "evaluation_type": "llm_judge",
+                "evaluation_config": {"prompt": "Test prompt"},
+                "output_type": "boolean",
+                "output_config": {},
+                "conditions": [{"id": "test-condition", "rollout_percentage": 50, "properties": []}],
+                "target": "session",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_evaluation_rollback_when_auto_report_fails(self):
         """
         perform_create wraps the Evaluation save and the EvaluationReport auto-create in

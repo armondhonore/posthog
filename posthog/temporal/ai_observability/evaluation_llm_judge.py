@@ -211,6 +211,34 @@ def _execute_llm_judge_activity(inputs: ExecuteLLMJudgeInputs) -> EvaluationActi
     if _is_errored_trace(properties):
         return _build_errored_trace_result(allows_na)
 
+    input_raw, output_raw = extract_event_io(event_type, properties)
+    tools_raw = extract_event_tools(properties)
+
+    input_data = extract_text_from_messages(input_raw)
+    output_data = extract_text_from_messages(output_raw)
+    tools_data = format_tool_definitions(tools_raw)
+
+    system_prompt = build_system_prompt(prompt, allows_na)
+
+    sections = [f"Input: {input_data}"]
+    if tools_data:
+        sections.append(f"Tools available:\n{tools_data}")
+    sections.append(f"Output: {output_data}")
+    user_prompt = "\n\n".join(sections)
+
+    return call_llm_judge(
+        evaluation=evaluation,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        allows_na=allows_na,
+    )
+
+
+def resolve_judge_provider(evaluation: dict[str, Any]) -> tuple[str, str, LLMProviderKey | None]:
+    """Resolve (provider, model, provider_key) for an LLM judge run, enforcing BYOK and trial gates.
+
+    Shared by the single-event and trace-level judge paths.
+    """
     team_id = evaluation["team_id"]
     model_configuration = evaluation.get("model_configuration")
 
@@ -287,25 +315,29 @@ def _execute_llm_judge_activity(inputs: ExecuteLLMJudgeInputs) -> EvaluationActi
         model = DEFAULT_JUDGE_MODEL
         provider_key = _get_legacy_provider_key()
 
+    return provider, model, provider_key
+
+
+def call_llm_judge(
+    *,
+    evaluation: dict[str, Any],
+    system_prompt: str,
+    user_prompt: str,
+    allows_na: bool,
+) -> EvaluationActivityResult:
+    """Resolve the judge model/key for `evaluation` and run a single judge completion.
+
+    Shared by the single-event and trace-level judge activities — everything from provider
+    resolution through error mapping and result shaping is identical between them; only how the
+    user prompt is assembled differs.
+    """
+    provider, model, provider_key = resolve_judge_provider(evaluation)
+
     is_byok = provider_key is not None
     key_id = str(provider_key.id) if provider_key else None
 
-    input_raw, output_raw = extract_event_io(event_type, properties)
-    tools_raw = extract_event_tools(properties)
-
-    input_data = extract_text_from_messages(input_raw)
-    output_data = extract_text_from_messages(output_raw)
-    tools_data = format_tool_definitions(tools_raw)
-
     type_config = get_output_type_config(allows_na)
-    system_prompt = build_system_prompt(prompt, allows_na)
     response_format = type_config.response_format
-
-    sections = [f"Input: {input_data}"]
-    if tools_data:
-        sections.append(f"Tools available:\n{tools_data}")
-    sections.append(f"Output: {output_data}")
-    user_prompt = "\n\n".join(sections)
 
     config = get_eval_config(provider) if provider_key is None else None
 
