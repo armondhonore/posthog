@@ -16,6 +16,7 @@ import { sum, sumOk, sumResult, timer } from '~/ingestion/framework/extensions/t
 import { isDropResult } from '~/ingestion/framework/results'
 
 import { createProcessAiEventStep } from './steps/process-ai-event-step'
+import { createVerifyGatewayProvenanceStep } from './steps/verify-gateway-provenance-step'
 
 export type { AiEventSubpipelineConfig, AiEventSubpipelineInput } from '~/ingestion/common/ai-subpipeline.contract'
 
@@ -58,6 +59,14 @@ export function createAiEventSubpipeline<TInput extends AiEventSubpipelineInput,
             ])
         )
         .pipe(createNormalizeEventStep())
+        // Before AI enrichment: token is still on headers and $ai_gateway*
+        // properties survive untouched, so the signature is reconstructable.
+        .pipe(
+            createVerifyGatewayProvenanceStep(
+                options.AI_GATEWAY_SIGNING_SECRET,
+                options.AI_GATEWAY_SIGNATURE_MAX_AGE_MS
+            )
+        )
         .pipe(createProcessAiEventStep())
         .pipe(createProcessPersonlessStep(options.FLAG_CALLED_PERSONLESS_DEFAULT_TEAMS))
         .pipe(
