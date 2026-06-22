@@ -12,6 +12,7 @@ from posthog.schema import CachedEventsQueryResponse, DashboardFilter, EventsQue
 
 from posthog.hogql import ast
 from posthog.hogql.ast import Alias
+from posthog.hogql.constants import HogQLGlobalSettings
 from posthog.hogql.parser import parse_expr, parse_order_expr, parse_select
 from posthog.hogql.property import (
     action_to_expr,
@@ -56,6 +57,15 @@ SELECT_STAR_FROM_EVENTS_FIELDS = [
 # Wide columns that defeat presorted optimization
 WIDE_COLUMNS = {"elements_chain", "properties"}
 
+# Memory guardrails for the presorted (narrow-sort) path. Even though the inner subquery only
+# projects `uuid`, it still has to read and decompress the `properties` column to evaluate the
+# user's filters across the whole scanned range; on very high-volume teams that parallel
+# decompression is what trips the per-query memory limit. Capping the thread count bounds how many
+# granules are decompressed in parallel, and spilling the sort to disk bounds the sort buffer, so a
+# heavy fetch degrades into a slower success instead of an out-of-memory failure.
+PRESORTED_MAX_THREADS = 8
+PRESORTED_MAX_BYTES_BEFORE_EXTERNAL_SORT = 1024 * 1024 * 1024  # 1 GiB
+
 
 class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
     query: EventsQuery
@@ -67,6 +77,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
             limit_context=self.limit_context, limit=self.query.limit, offset=self.query.offset
         )
         self._cursor_eligible = False
+        self._used_presorted_optimization = False
 
     @cached_property
     def source_runner(self) -> InsightActorsQueryRunner:
@@ -129,6 +140,17 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                     return False
 
         return True
+
+    def _memory_bounded_settings(self) -> HogQLGlobalSettings | None:
+        # Only bound memory on the presorted path — that's the narrow-sort shape whose inner
+        # subquery decompresses `properties` across a potentially huge scan. `to_query()` sets the
+        # flag, so this must be read after it has run.
+        if not self._used_presorted_optimization:
+            return None
+        return HogQLGlobalSettings(
+            max_threads=PRESORTED_MAX_THREADS,
+            max_bytes_before_external_sort=PRESORTED_MAX_BYTES_BEFORE_EXTERNAL_SORT,
+        )
 
     def apply_pagination_cursor(self, cursor: str) -> None:
         # NB: This uses the last row's timestamp as the cursor, so events sharing
@@ -393,6 +415,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
                 # Presorted optimization: sort narrow data (uuid) first, then fetch wide data for matched rows.
                 # Avoids sorting giant rows with properties and elements_chain cols - instead sorts uuids.
                 if self._can_use_presorted_optimization(order_by) and not has_any_aggregation:
+                    self._used_presorted_optimization = True
                     logger.info(
                         "events_query_runner_presorted_optimization",
                         team_id=self.team.pk,
@@ -418,14 +441,18 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
         # the `select` / `where` strings it builds are platform constants. User-facing
         # `EventsQuery` execution always lands in `_calculate()` via the runner.
         tag_contains_user_hogql()
+        # Build the query before reading the settings — `to_query()` decides whether the presorted
+        # optimization (and thus the memory guardrails) applies.
+        query = self.to_query()
         query_result = self.paginator.execute_hogql_query(
-            query=self.to_query(),
+            query=query,
             team=self.team,
             query_type="EventsQuery",
             timings=self.timings,
             modifiers=self.modifiers,
             limit_context=self.limit_context,
             user=self.user,
+            settings=self._memory_bounded_settings(),
         )
 
         # Convert star field from tuple to dict in each result

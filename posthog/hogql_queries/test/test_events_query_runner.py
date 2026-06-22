@@ -26,7 +26,11 @@ from posthog.schema import (
 from posthog.hogql import ast
 from posthog.hogql.ast import CompareOperationOp
 
-from posthog.hogql_queries.events_query_runner import EventsQueryRunner
+from posthog.hogql_queries.events_query_runner import (
+    PRESORTED_MAX_BYTES_BEFORE_EXTERNAL_SORT,
+    PRESORTED_MAX_THREADS,
+    EventsQueryRunner,
+)
 from posthog.models import Element, Organization, OrganizationMembership, Person, PropertyDefinition, Team
 
 from products.access_control.backend.models.property_access_control import PropertyAccessControl
@@ -591,6 +595,36 @@ class TestEventsQueryRunner(ClickhouseTestMixin, APIBaseTest):
         assert response.results[0][0]["distinct_id"] == "p3"
         assert response.results[1][0]["distinct_id"] == "p2"
         assert response.results[2][0]["distinct_id"] == "p1"
+
+    def test_memory_bounded_settings_applied_on_presorted_path(self):
+        query = EventsQuery(
+            after="-7d",
+            event="$pageview",
+            kind="EventsQuery",
+            orderBy=["timestamp DESC"],
+            select=["*"],
+        )
+        runner = EventsQueryRunner(query=query, team=self.team)
+        # `to_query()` decides whether the presorted optimization (and thus the guardrails) applies.
+        runner.to_query()
+
+        assert runner._used_presorted_optimization is True
+        settings = runner._memory_bounded_settings()
+        assert settings is not None
+        assert settings.max_threads == PRESORTED_MAX_THREADS
+        assert settings.max_bytes_before_external_sort == PRESORTED_MAX_BYTES_BEFORE_EXTERNAL_SORT
+
+    def test_memory_bounded_settings_skipped_for_aggregation(self):
+        query = EventsQuery(
+            after="-7d",
+            kind="EventsQuery",
+            select=["count()"],
+        )
+        runner = EventsQueryRunner(query=query, team=self.team)
+        runner.to_query()
+
+        assert runner._used_presorted_optimization is False
+        assert runner._memory_bounded_settings() is None
 
     def test_select_person_column(self):
         self._create_events(

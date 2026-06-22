@@ -15,12 +15,16 @@ import { EventsQuery, EventsQueryResponse } from '~/queries/schema/schema-genera
 // the primary-key sparse index over `(team_id, toDate(timestamp), event, ...)` prune to just the
 // granules holding those rows.
 //
-// On top of that, when the caller's window is wider than 24h we try a 24h pre-stage first. Most
-// matching events the user wants to test against fire recently, so this skips the deep scan when
-// possible. If the 24h pre-stage returns nothing we fall through to the caller's original window.
+// On top of that, we try a ladder of progressively wider windows before the caller's full range.
+// Most matching events the user wants to test against fire recently, so a high-volume team resolves
+// at the first narrow step and never pays for the deep scan — and that deep scan is exactly what
+// trips the per-query memory limit on massive teams. A low-volume team (which doesn't hit the memory
+// ceiling) simply falls through each empty step to its original window.
+const PRE_STAGE_WINDOWS = ['-1h', '-6h', '-24h', '-7d']
+
 export async function performWideEventsQueryInTwoPhases(intent: EventsQuery): Promise<EventsQueryResponse> {
-    if (shouldTry24hPreStage(intent.after)) {
-        const preResponse = await runTwoPhase({ ...intent, after: '-24h' })
+    for (const after of preStageWindows(intent.after)) {
+        const preResponse = await runTwoPhase({ ...intent, after })
         if ((preResponse.results as unknown[]).length > 0) {
             return preResponse
         }
@@ -71,22 +75,36 @@ function formatClickHouseUtcDateTime64(timestamp: string): string {
     return `toDateTime64('${base}.${micros}', 6, 'UTC')`
 }
 
-// Returns true if `after` represents a window strictly wider than 24h. Accepts the relative range
-// shorthand the testing flows use (`-7d`, `-30d`, `-24h`, `-1h`, etc.) and absolute ISO timestamps.
-// If the window is 24h or narrower we skip the pre-stage so we never widen a caller's request.
-function shouldTry24hPreStage(after: string | undefined): boolean {
+// Pre-stage windows strictly narrower than the caller's window, narrowest first. We never widen a
+// caller's request, so anything as wide as (or wider than) `after` is dropped — the caller's own
+// window is the final fallback. An unbounded or unparseable `after` gets no pre-stages.
+function preStageWindows(after: string | undefined): string[] {
+    const callerHours = windowToHours(after)
+    if (callerHours === null) {
+        return []
+    }
+    return PRE_STAGE_WINDOWS.filter((window) => {
+        const hours = windowToHours(window)
+        return hours !== null && hours < callerHours
+    })
+}
+
+// Width of a window in hours. Accepts the relative range shorthand the testing flows use (`-7d`,
+// `-30d`, `-24h`, `-1h`, etc.) and absolute ISO timestamps. Returns null when there's no bound or
+// the value can't be parsed.
+function windowToHours(after: string | undefined): number | null {
     if (!after) {
-        return false
+        return null
     }
     const relativeMatch = after.match(/^-(\d+)([smhdwMy])$/)
     if (relativeMatch) {
         const value = parseInt(relativeMatch[1], 10)
         const unit = relativeMatch[2] as 's' | 'm' | 'h' | 'd' | 'w' | 'M' | 'y'
-        return dayjs.duration(value, unit).asHours() > 24
+        return dayjs.duration(value, unit).asHours()
     }
     const parsed = dayjs(after)
     if (parsed.isValid()) {
-        return dayjs().diff(parsed, 'hour', true) > 24
+        return dayjs().diff(parsed, 'hour', true)
     }
-    return false
+    return null
 }

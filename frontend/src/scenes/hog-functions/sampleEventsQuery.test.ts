@@ -30,31 +30,54 @@ describe('performWideEventsQueryInTwoPhases', () => {
         mockedPerformQuery.mockReset()
     })
 
-    describe('24h pre-stage', () => {
-        it('runs a 24h two-phase first when the caller window is wider than 24h, and returns it on success', async () => {
+    describe('pre-stage window ladder', () => {
+        it('runs the narrowest two-phase first when the caller window is wider, and returns it on success', async () => {
             mockedPerformQuery
-                // Pre-stage phase 1 (24h)
+                // Pre-stage phase 1 (-1h)
                 .mockResolvedValueOnce({
                     results: [['019eacd8-2ab7-76b0-8e40-604d7f8e6961', '2026-06-09T07:45:08.404000-07:00']],
                 })
-                // Pre-stage phase 2 (24h hydration)
+                // Pre-stage phase 2 (-1h hydration)
                 .mockResolvedValueOnce({ results: [['hydrated-recent']] })
 
             const result = await performWideEventsQueryInTwoPhases(intent)
 
             expect(mockedPerformQuery).toHaveBeenCalledTimes(2)
             const preStagePhaseOne = mockedPerformQuery.mock.calls[0][0] as EventsQuery
-            expect(preStagePhaseOne.after).toBe('-24h')
+            expect(preStagePhaseOne.after).toBe('-1h')
             expect(preStagePhaseOne.select).toEqual(['uuid', 'timestamp'])
 
             expect((result.results as unknown[])[0]).toEqual(['hydrated-recent'])
         })
 
-        it('falls through to the original window when the 24h pre-stage finds nothing', async () => {
+        it('widens through the ladder, stopping at the first window that returns rows', async () => {
             mockedPerformQuery
-                // Pre-stage phase 1 (24h) — empty
+                // -1h phase 1 — empty
                 .mockResolvedValueOnce({ results: [] })
-                // Main phase 1 (7d)
+                // -6h phase 1 — empty
+                .mockResolvedValueOnce({ results: [] })
+                // -24h phase 1 — hit
+                .mockResolvedValueOnce({
+                    results: [['019eacd8-2ab7-76b0-8e40-604d7f8e6961', '2026-06-09T07:45:08.404000-07:00']],
+                })
+                // -24h phase 2 — hydration
+                .mockResolvedValueOnce({ results: [['hydrated-day']] })
+
+            const result = await performWideEventsQueryInTwoPhases(intent)
+
+            expect(mockedPerformQuery).toHaveBeenCalledTimes(4)
+            const afters = mockedPerformQuery.mock.calls.map((c) => (c[0] as EventsQuery).after)
+            expect(afters).toEqual(['-1h', '-6h', '-24h', '-24h'])
+            expect((result.results as unknown[])[0]).toEqual(['hydrated-day'])
+        })
+
+        it('falls through to the original window when every pre-stage finds nothing', async () => {
+            mockedPerformQuery
+                // -1h, -6h, -24h phase 1 — all empty
+                .mockResolvedValueOnce({ results: [] })
+                .mockResolvedValueOnce({ results: [] })
+                .mockResolvedValueOnce({ results: [] })
+                // Main phase 1 (-7d)
                 .mockResolvedValueOnce({
                     results: [['019eacd8-2ab7-76b0-8e40-604d7f8e6961', '2026-06-09T07:45:08.404000-07:00']],
                 })
@@ -63,21 +86,23 @@ describe('performWideEventsQueryInTwoPhases', () => {
 
             const result = await performWideEventsQueryInTwoPhases(intent)
 
-            expect(mockedPerformQuery).toHaveBeenCalledTimes(3)
-            expect((mockedPerformQuery.mock.calls[0][0] as EventsQuery).after).toBe('-24h')
-            expect((mockedPerformQuery.mock.calls[1][0] as EventsQuery).after).toBe('-7d')
+            expect(mockedPerformQuery).toHaveBeenCalledTimes(5)
+            const afters = mockedPerformQuery.mock.calls.map((c) => (c[0] as EventsQuery).after)
+            expect(afters).toEqual(['-1h', '-6h', '-24h', '-7d', '-7d'])
             expect((result.results as unknown[])[0]).toEqual(['hydrated-week'])
         })
 
         // Boundary table: each row asserts the full sequence of `after` values ClickHouse sees.
-        // A leading `-24h` means the pre-stage fired; otherwise it was skipped. All mocked phase-1
-        // responses are empty so each entry in `expectedAfters` corresponds to exactly one query.
+        // All mocked phase-1 responses are empty, so each entry in `expectedAfters` corresponds to
+        // exactly one query: the pre-stage windows narrower than the caller's window, then the
+        // caller's own window as the final fallback.
         it.each([
-            { label: 'exactly 24h', after: '-24h', expectedAfters: ['-24h'] },
-            { label: 'narrower than 24h', after: '-1h', expectedAfters: ['-1h'] },
+            { label: 'exactly 24h', after: '-24h', expectedAfters: ['-1h', '-6h', '-24h'] },
+            { label: 'narrowest, no pre-stages', after: '-1h', expectedAfters: ['-1h'] },
+            { label: 'between ladder steps', after: '-3h', expectedAfters: ['-1h', '-3h'] },
             { label: 'no window specified', after: undefined, expectedAfters: [undefined] },
-            { label: '30d', after: '-30d', expectedAfters: ['-24h', '-30d'] },
-        ])('pre-stage boundary: $label', async ({ after, expectedAfters }) => {
+            { label: '30d', after: '-30d', expectedAfters: ['-1h', '-6h', '-24h', '-7d', '-30d'] },
+        ])('ladder boundary: $label', async ({ after, expectedAfters }) => {
             for (let i = 0; i < expectedAfters.length; i++) {
                 mockedPerformQuery.mockResolvedValueOnce({ results: [] })
             }
@@ -89,42 +114,38 @@ describe('performWideEventsQueryInTwoPhases', () => {
         })
     })
 
-    describe('two-phase mechanics (pre-stage empty, falling through to caller window)', () => {
-        // Pre-stage is always empty in this block so the assertions read against the main two-phase
-        // call, which is what each test actually exercises.
-        const emptyPreStage = (): void => {
-            mockedPerformQuery.mockResolvedValueOnce({ results: [] })
-        }
+    describe('two-phase mechanics', () => {
+        // The intent here uses the narrowest window so the ladder is empty and the main two-phase is
+        // the very first call — keeping these assertions focused on the two-phase mechanics rather
+        // than the pre-stage sequence.
+        const mechanicsIntent: EventsQuery = { ...intent, after: '-1h' }
 
         it('strips wide select in phase 1 while preserving filters, window, order, limit', async () => {
-            emptyPreStage()
             mockedPerformQuery.mockResolvedValueOnce({ results: [] })
 
-            await performWideEventsQueryInTwoPhases(intent)
+            await performWideEventsQueryInTwoPhases(mechanicsIntent)
 
-            expect(mockedPerformQuery).toHaveBeenCalledTimes(2)
-            const phaseOne = mockedPerformQuery.mock.calls[1][0] as EventsQuery
+            expect(mockedPerformQuery).toHaveBeenCalledTimes(1)
+            const phaseOne = mockedPerformQuery.mock.calls[0][0] as EventsQuery
             expect(phaseOne.select).toEqual(['uuid', 'timestamp'])
-            expect(phaseOne.fixedProperties).toEqual(intent.fixedProperties)
-            expect(phaseOne.after).toBe('-7d')
+            expect(phaseOne.fixedProperties).toEqual(mechanicsIntent.fixedProperties)
+            expect(phaseOne.after).toBe('-1h')
             expect(phaseOne.limit).toBe(10)
             expect(phaseOne.orderBy).toEqual(['timestamp DESC'])
-            expect(phaseOne.modifiers).toEqual(intent.modifiers)
+            expect(phaseOne.modifiers).toEqual(mechanicsIntent.modifiers)
         })
 
         it('returns the phase-1 response without running phase 2 when nothing matches', async () => {
-            emptyPreStage()
             const emptyResponse = { results: [], columns: [], types: [], hogql: 'SELECT' }
             mockedPerformQuery.mockResolvedValueOnce(emptyResponse)
 
-            const result = await performWideEventsQueryInTwoPhases(intent)
+            const result = await performWideEventsQueryInTwoPhases(mechanicsIntent)
 
-            expect(mockedPerformQuery).toHaveBeenCalledTimes(2)
+            expect(mockedPerformQuery).toHaveBeenCalledTimes(1)
             expect(result).toBe(emptyResponse)
         })
 
         it('hydrates phase 2 by exact (uuid, timestamp) tuples, drops the original filter, and bounds the window', async () => {
-            emptyPreStage()
             const phaseOneRows = [
                 ['019eacd8-2ab7-76b0-8e40-604d7f8e6961', '2026-06-09T07:45:08.404000-07:00'],
                 ['019eaca0-c933-7806-9aab-e211b2cdf59b', '2026-06-09T06:44:38.960000-07:00'],
@@ -134,13 +155,13 @@ describe('performWideEventsQueryInTwoPhases', () => {
 
             mockedPerformQuery.mockResolvedValueOnce({ results: phaseOneRows }).mockResolvedValueOnce(hydratedResponse)
 
-            const result = await performWideEventsQueryInTwoPhases(intent)
+            const result = await performWideEventsQueryInTwoPhases(mechanicsIntent)
 
-            expect(mockedPerformQuery).toHaveBeenCalledTimes(3)
-            const phaseTwo = mockedPerformQuery.mock.calls[2][0] as EventsQuery
+            expect(mockedPerformQuery).toHaveBeenCalledTimes(2)
+            const phaseTwo = mockedPerformQuery.mock.calls[1][0] as EventsQuery
 
             // Phase 2 keeps the original wide select so the caller still gets the hydrated columns.
-            expect(phaseTwo.select).toEqual(intent.select)
+            expect(phaseTwo.select).toEqual(mechanicsIntent.select)
 
             // Phase 2 drops the original filter — phase 1 already certified those UUIDs.
             expect(phaseTwo.fixedProperties).toBeUndefined()
@@ -170,9 +191,8 @@ describe('performWideEventsQueryInTwoPhases', () => {
         })
 
         it('preserves caller-supplied `where` fragments in phase 2 and appends the tuple filter', async () => {
-            emptyPreStage()
             const intentWithWhere: EventsQuery = {
-                ...intent,
+                ...mechanicsIntent,
                 where: ['team_id = 1'],
             }
             mockedPerformQuery
@@ -183,8 +203,8 @@ describe('performWideEventsQueryInTwoPhases', () => {
 
             await performWideEventsQueryInTwoPhases(intentWithWhere)
 
-            const phaseOne = mockedPerformQuery.mock.calls[1][0] as EventsQuery
-            const phaseTwo = mockedPerformQuery.mock.calls[2][0] as EventsQuery
+            const phaseOne = mockedPerformQuery.mock.calls[0][0] as EventsQuery
+            const phaseTwo = mockedPerformQuery.mock.calls[1][0] as EventsQuery
 
             // Phase 1 keeps the original `where` alongside the original filter for correctness.
             expect(phaseOne.where).toEqual(['team_id = 1'])
@@ -196,33 +216,31 @@ describe('performWideEventsQueryInTwoPhases', () => {
         })
 
         it('handles single-result phase 1 by collapsing the window to one timestamp ± 1s', async () => {
-            emptyPreStage()
             mockedPerformQuery
                 .mockResolvedValueOnce({
                     results: [['019eacd8-2ab7-76b0-8e40-604d7f8e6961', '2026-06-09T12:00:05.000000Z']],
                 })
                 .mockResolvedValueOnce({ results: [['hydrated']] })
 
-            await performWideEventsQueryInTwoPhases(intent)
+            await performWideEventsQueryInTwoPhases(mechanicsIntent)
 
-            const phaseTwo = mockedPerformQuery.mock.calls[2][0] as EventsQuery
+            const phaseTwo = mockedPerformQuery.mock.calls[1][0] as EventsQuery
             expect(phaseTwo.after).toBe('2026-06-09T12:00:04.000Z')
             expect(phaseTwo.before).toBe('2026-06-09T12:00:06.000Z')
             expect(phaseTwo.limit).toBe(1)
         })
 
         it('does not mutate the intent query', async () => {
-            emptyPreStage()
-            const intentCopy = JSON.parse(JSON.stringify(intent))
+            const intentCopy = JSON.parse(JSON.stringify(mechanicsIntent))
             mockedPerformQuery
                 .mockResolvedValueOnce({
                     results: [['019eacd8-2ab7-76b0-8e40-604d7f8e6961', '2026-06-09T12:00:00.000000Z']],
                 })
                 .mockResolvedValueOnce({ results: [] })
 
-            await performWideEventsQueryInTwoPhases(intent)
+            await performWideEventsQueryInTwoPhases(mechanicsIntent)
 
-            expect(intent).toEqual(intentCopy)
+            expect(mechanicsIntent).toEqual(intentCopy)
         })
     })
 })
