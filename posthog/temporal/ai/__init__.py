@@ -13,11 +13,6 @@ from posthog.temporal.ai.slack_app.posthog_code_slack_interactivity import (
 )
 from posthog.temporal.ai.slack_app.posthog_code_slack_mention import PostHogCodeSlackMentionWorkflow
 from posthog.temporal.ai.slack_app.posthog_code_slack_mention_command import PostHogCodeSlackMentionCommandWorkflow
-from posthog.temporal.ai.slack_conversation import (
-    SlackConversationRunnerWorkflow,
-    SlackConversationRunnerWorkflowInputs,
-    process_slack_conversation_activity,
-)
 
 from .llm_traces_summaries.summarize_traces import (
     SummarizeLLMTracesInputs,
@@ -53,7 +48,6 @@ AI_WORKFLOWS = [
     ChatAgentWorkflow,
     ResearchAgentWorkflow,
     SummarizeLLMTracesWorkflow,
-    SlackConversationRunnerWorkflow,
     AnomalyInvestigationWorkflow,
 ]
 
@@ -65,12 +59,10 @@ AI_ACTIVITIES = [
     process_chat_agent_activity,
     process_research_agent_activity,
     summarize_llm_traces_activity,
-    process_slack_conversation_activity,
     investigate_anomaly_activity,
 ]
 
 __all__ = [
     "SyncVectorsInputs",
     "SummarizeLLMTracesInputs",
-    "SlackConversationRunnerWorkflowInputs",
 ]
