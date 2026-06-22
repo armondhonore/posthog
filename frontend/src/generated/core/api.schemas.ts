@@ -3684,6 +3684,19 @@ export interface UserSlackIntegrationListResponseApi {
     results: UserSlackIntegrationItemApi[]
 }
 
+export interface UserSlackLinkStartRequestApi {
+    /**
+     * Optional team/project id to link against; defaults to the user's current team.
+     * @nullable
+     */
+    team_id?: number | null
+}
+
+export interface UserSlackLinkStartResponseApi {
+    /** URL to open in the browser to start the Sign-in-with-Slack flow. */
+    install_url: string
+}
+
 /**
  * * `later` - Later
  * * `other` - Other

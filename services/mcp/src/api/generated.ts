@@ -49448,6 +49448,19 @@ export namespace Schemas {
       results: UserSlackIntegrationItem[];
     }
 
+    export interface UserSlackLinkStartRequest {
+      /**
+         * Optional team/project id to link against; defaults to the user's current team.
+         * @nullable
+         */
+      team_id?: number | null;
+    }
+
+    export interface UserSlackLinkStartResponse {
+      /** URL to open in the browser to start the Sign-in-with-Slack flow. */
+      install_url: string;
+    }
+
     export interface UtmEvent {
       /** UTM campaign value from pageview events */
       utm_campaign: string;

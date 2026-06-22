@@ -692,6 +692,9 @@ tools:
     users-integrations-slack-retrieve:
         operation: users_integrations_slack_retrieve
         enabled: false
+    users-integrations-slack-start-create:
+        operation: users_integrations_slack_start_create
+        enabled: false
     users-list:
         operation: users_list
         enabled: false

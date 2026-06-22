@@ -80,6 +80,8 @@ import type {
     UserPushTokenRegisterRequestApi,
     UserPushTokenUnregisterRequestApi,
     UserSlackIntegrationListResponseApi,
+    UserSlackLinkStartRequestApi,
+    UserSlackLinkStartResponseApi,
     UsersIntegrationsGithubBranchesRetrieveParams,
     UsersIntegrationsGithubReposRetrieveParams,
     UsersIntegrationsListParams,
@@ -3391,6 +3393,36 @@ export const usersIntegrationsSlackDestroy = async (
     return apiMutator<void>(getUsersIntegrationsSlackDestroyUrl(uuid, slackUserId), {
         ...options,
         method: 'DELETE',
+    })
+}
+
+export const getUsersIntegrationsSlackStartCreateUrl = (uuid: string) => {
+    return `/api/users/${uuid}/integrations/slack/start/`
+}
+
+/**
+ * Mint a Sign-in-with-Slack invite URL initiated from settings, without
+ * Slack-DM context. The returned URL takes the user through PostHog login
+ * (already satisfied here), then to Slack OAuth, then back to our callback
+ * which writes the ``UserIntegration`` row.
+ *
+ * Resolves the target Slack workspace from the user's ``team_id`` body
+ * param (or ``current_team`` when omitted, mirroring ``github_start``).
+ * Refuses if the target team has no Slack workspace connected, if the
+ * feature flag is off for the workspace, or if the user is already linked
+ * to this workspace.
+ * @summary Start Slack identity link from settings
+ */
+export const usersIntegrationsSlackStartCreate = async (
+    uuid: string,
+    userSlackLinkStartRequestApi?: UserSlackLinkStartRequestApi,
+    options?: RequestInit
+): Promise<UserSlackLinkStartResponseApi> => {
+    return apiMutator<UserSlackLinkStartResponseApi>(getUsersIntegrationsSlackStartCreateUrl(uuid), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(userSlackLinkStartRequestApi),
     })
 }
 
