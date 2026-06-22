@@ -3656,6 +3656,34 @@ export interface UserGitHubLinkStartResponseApi {
     connect_flow: string
 }
 
+export interface UserSlackIntegrationItemApi {
+    /** PostHog UserIntegration row id. */
+    id: string
+    /** Integration kind; always `slack` for this API. */
+    kind: string
+    /** Slack user id this PostHog account is linked to. */
+    slack_user_id: string
+    /** Slack workspace (team) id the link belongs to. */
+    slack_team_id: string
+    /**
+     * Slack workspace display name as of link time.
+     * @nullable
+     */
+    slack_team_name?: string | null
+    /**
+     * Slack email at the time of linking. Stored for support; not consulted at resolve time.
+     * @nullable
+     */
+    slack_email_at_link?: string | null
+    /** When this link was first created. */
+    created_at: string
+}
+
+export interface UserSlackIntegrationListResponseApi {
+    /** Slack identity links for the authenticated user. */
+    results: UserSlackIntegrationItemApi[]
+}
+
 /**
  * * `later` - Later
  * * `other` - Other

@@ -79,6 +79,7 @@ import type {
     UserPushTokenItemApi,
     UserPushTokenRegisterRequestApi,
     UserPushTokenUnregisterRequestApi,
+    UserSlackIntegrationListResponseApi,
     UsersIntegrationsGithubBranchesRetrieveParams,
     UsersIntegrationsGithubReposRetrieveParams,
     UsersIntegrationsListParams,
@@ -3348,6 +3349,48 @@ export const usersIntegrationsGithubStartCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(userGitHubLinkStartRequestApi),
+    })
+}
+
+export const getUsersIntegrationsSlackRetrieveUrl = (uuid: string) => {
+    return `/api/users/${uuid}/integrations/slack/`
+}
+
+/**
+ * List Slack identity links for this user (zero, one, or more — one row per
+ * linked Slack workspace). Flag-agnostic by design: pre-existing rows from
+ * when the feature was on must remain visible (and unlinkable) after the
+ * flag is rolled back.
+ * @summary List personal Slack identity links
+ */
+export const usersIntegrationsSlackRetrieve = async (
+    uuid: string,
+    options?: RequestInit
+): Promise<UserSlackIntegrationListResponseApi> => {
+    return apiMutator<UserSlackIntegrationListResponseApi>(getUsersIntegrationsSlackRetrieveUrl(uuid), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getUsersIntegrationsSlackDestroyUrl = (uuid: string, slackUserId: string) => {
+    return `/api/users/${uuid}/integrations/slack/${slackUserId}/`
+}
+
+/**
+ * Remove a Slack identity link by Slack user id. Idempotent and
+ * flag-agnostic — users must always be able to unlink even after the
+ * feature flag is turned off.
+ * @summary Unlink a Slack identity
+ */
+export const usersIntegrationsSlackDestroy = async (
+    uuid: string,
+    slackUserId: string,
+    options?: RequestInit
+): Promise<void> => {
+    return apiMutator<void>(getUsersIntegrationsSlackDestroyUrl(uuid, slackUserId), {
+        ...options,
+        method: 'DELETE',
     })
 }
 

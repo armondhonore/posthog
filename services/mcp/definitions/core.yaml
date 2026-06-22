@@ -686,6 +686,12 @@ tools:
     users-integrations-list:
         operation: users_integrations_list
         enabled: false
+    users-integrations-slack-destroy:
+        operation: users_integrations_slack_destroy
+        enabled: false
+    users-integrations-slack-retrieve:
+        operation: users_integrations_slack_retrieve
+        enabled: false
     users-list:
         operation: users_list
         enabled: false
