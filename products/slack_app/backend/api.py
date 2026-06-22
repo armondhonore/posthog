@@ -52,7 +52,14 @@ from posthog.user_permissions import UserPermissions
 from posthog.utils import get_instance_region
 
 from products.slack_app.backend.models import SlackChannel, SlackThreadTaskMapping
-from products.slack_app.backend.services.app_home_handlers import (
+from products.slack_app.backend.services.integration_resolver import (
+    UserResolutionFailure,
+    format_project_candidate_list,
+    load_integrations,
+    resolve_user_for_workspace,
+    user_resolution_failure_reply,
+)
+from products.slack_app.backend.services.slack_app_home_handlers import (
     EDIT_PERSONAL as _AI_PREFS_ACTION_EDIT_PERSONAL,
     EDIT_WORKSPACE as _AI_PREFS_ACTION_EDIT_WORKSPACE,
     MODAL_MODEL as _AI_PREFS_MODAL_ACTION_MODEL,
@@ -61,13 +68,6 @@ from products.slack_app.backend.services.app_home_handlers import (
     handle_ai_prefs_block_action as _handle_ai_prefs_block_action,
     handle_app_home_opened as _handle_app_home_opened,
     handle_app_home_view_submission as _handle_app_home_view_submission,
-)
-from products.slack_app.backend.services.integration_resolver import (
-    UserResolutionFailure,
-    format_project_candidate_list,
-    load_integrations,
-    resolve_user_for_workspace,
-    user_resolution_failure_reply,
 )
 from products.slack_app.backend.services.slack_messages import resolve_user_mentions_text
 from products.slack_app.backend.services.slack_user_info import (

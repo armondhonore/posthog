@@ -17,7 +17,7 @@ from posthog.models.organization import Organization
 from posthog.models.team.team import Team
 
 from products.slack_app.backend.models import SlackSettings
-from products.slack_app.backend.services.app_home import (
+from products.slack_app.backend.services.slack_app_home import (
     ACTION_EDIT_PERSONAL,
     ACTION_EDIT_WORKSPACE,
     ACTION_RESET_PERSONAL,
@@ -28,7 +28,7 @@ from products.slack_app.backend.services.app_home import (
     MODAL_BLOCK_REASONING_EFFORT,
     MODAL_BLOCK_RUNTIME_ADAPTER,
 )
-from products.slack_app.backend.services.app_home_handlers import (
+from products.slack_app.backend.services.slack_app_home_handlers import (
     handle_ai_prefs_block_action,
     handle_app_home_opened,
     handle_app_home_view_submission,
@@ -58,7 +58,7 @@ def mock_slack_client():
     """
 
     fake_client = MagicMock()
-    with patch("products.slack_app.backend.services.app_home_handlers.SlackIntegration") as cls:
+    with patch("products.slack_app.backend.services.slack_app_home_handlers.SlackIntegration") as cls:
         instance = MagicMock()
         instance.client = fake_client
         cls.return_value = instance
@@ -77,7 +77,7 @@ def flag_on():
 @pytest.fixture
 def admin_user():
     with patch(
-        "products.slack_app.backend.services.app_home_handlers.is_slack_workspace_admin",
+        "products.slack_app.backend.services.slack_app_home_handlers.is_slack_workspace_admin",
         return_value=True,
     ):
         yield
@@ -86,7 +86,7 @@ def admin_user():
 @pytest.fixture
 def non_admin_user():
     with patch(
-        "products.slack_app.backend.services.app_home_handlers.is_slack_workspace_admin",
+        "products.slack_app.backend.services.slack_app_home_handlers.is_slack_workspace_admin",
         return_value=False,
     ):
         yield
@@ -132,11 +132,62 @@ def _stub_task_runtime_helpers():
 
     import sys
 
-    fake = ModuleType("products.tasks.backend.temporal.process_task.utils")
+    fake = ModuleType("products.tasks.backend.facade.run_config")
     fake.get_supported_reasoning_efforts = fake_get_supported
     fake.get_reasoning_effort_error = fake_get_error
     fake.PUBLIC_REASONING_EFFORTS = public_efforts
     fake.RuntimeAdapter = _RuntimeAdapter()
+    # `slack_app_home.py` consumes adapter and model display labels + the
+    # picker tree from the facade. Provide minimal stubs so renderer code
+    # paths exercised by the handler tests still work.
+    fake.RUNTIME_ADAPTER_DISPLAY_NAMES = {"claude": "Claude (Anthropic)", "codex": "Codex (OpenAI)"}
+    fake.MODEL_DISPLAY_NAMES = {
+        "claude-opus-4-7": "Claude Opus 4.7",
+        "claude-sonnet-4-6": "Claude Sonnet 4.6",
+        "gpt-5.5": "GPT-5.5",
+    }
+    fake.REASONING_EFFORT_DISPLAY_NAMES = {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high",
+        "max": "Max",
+    }
+
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class _PickerEffort:
+        value: str
+        label: str
+
+    @dataclass(frozen=True)
+    class _PickerModel:
+        value: str
+        label: str
+        supported_efforts: tuple = ()
+
+    @dataclass(frozen=True)
+    class _PickerAdapter:
+        value: str
+        label: str
+        models: tuple = ()
+
+    fake.get_picker_choices = lambda: (
+        _PickerAdapter(
+            value="claude",
+            label="Claude (Anthropic)",
+            models=(
+                _PickerModel(value="claude-opus-4-7", label="Claude Opus 4.7"),
+                _PickerModel(value="claude-sonnet-4-6", label="Claude Sonnet 4.6"),
+            ),
+        ),
+        _PickerAdapter(
+            value="codex",
+            label="Codex (OpenAI)",
+            models=(_PickerModel(value="gpt-5.5", label="GPT-5.5"),),
+        ),
+    )
 
     saved = sys.modules.get(fake.__name__)
     sys.modules[fake.__name__] = fake
@@ -280,7 +331,7 @@ class TestPersonalSubmit:
 
 class TestWorkspaceSubmitAdminGate:
     def test_non_admin_blocked(self, slack_integration, mock_slack_client, flag_on, non_admin_user):
-        from products.slack_app.backend.services.app_home import EDIT_MODAL_WORKSPACE_CALLBACK_ID
+        from products.slack_app.backend.services.slack_app_home import EDIT_MODAL_WORKSPACE_CALLBACK_ID
 
         payload = _view_submission_payload(
             callback_id=EDIT_MODAL_WORKSPACE_CALLBACK_ID,

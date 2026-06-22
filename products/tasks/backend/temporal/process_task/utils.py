@@ -128,6 +128,117 @@ CODEX_XHIGH_REASONING_EFFORTS: tuple[ReasoningEffort, ...] = (
 )
 CODEX_XHIGH_REASONING_MODELS: frozenset[str] = frozenset({"gpt-5.5"})
 
+# Canonical list of Codex models. The runtime technically accepts any
+# `gpt-*` identifier passed through, but only models on this list are
+# considered tested and surfaced in pickers. Extend when a new Codex model
+# ships.
+CODEX_MODELS: tuple[str, ...] = ("gpt-5", "gpt-5.5")
+
+
+# Human-readable display labels for every runtime adapter, model, and
+# reasoning effort the runtime supports. Single source of truth — any UI
+# (settings pickers, debug tables, audit logs) should pull from here so the
+# spelling stays consistent across surfaces.
+RUNTIME_ADAPTER_DISPLAY_NAMES: dict[str, str] = {
+    RuntimeAdapter.CLAUDE.value: "Claude (Anthropic)",
+    RuntimeAdapter.CODEX.value: "Codex (OpenAI)",
+}
+
+MODEL_DISPLAY_NAMES: dict[str, str] = {
+    "claude-opus-4-5": "Claude Opus 4.5",
+    "claude-opus-4-6": "Claude Opus 4.6",
+    "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-opus-4-8": "Claude Opus 4.8",
+    "claude-fable-5": "Claude Fable 5",
+    "claude-sonnet-4-6": "Claude Sonnet 4.6",
+    "gpt-5": "GPT-5",
+    "gpt-5.5": "GPT-5.5",
+}
+
+REASONING_EFFORT_DISPLAY_NAMES: dict[str, str] = {
+    ReasoningEffort.LOW.value: "Low",
+    ReasoningEffort.MEDIUM.value: "Medium",
+    ReasoningEffort.HIGH.value: "High",
+    ReasoningEffort.XHIGH.value: "Extra high",
+    ReasoningEffort.MAX.value: "Max",
+}
+
+
+@dataclass(frozen=True)
+class PickerEffort:
+    """A single reasoning effort choice for a model picker UI."""
+
+    value: str
+    label: str
+
+
+@dataclass(frozen=True)
+class PickerModel:
+    """A single model choice grouped under its runtime adapter."""
+
+    value: str
+    label: str
+    supported_efforts: tuple[PickerEffort, ...]
+
+
+@dataclass(frozen=True)
+class PickerAdapter:
+    """A single runtime adapter exposed to a picker UI, with its models."""
+
+    value: str
+    label: str
+    models: tuple[PickerModel, ...]
+
+
+def get_models_for_runtime_adapter(runtime_adapter: RuntimeAdapter | str | None) -> tuple[str, ...]:
+    """Return the canonical model identifiers the given runtime adapter exposes.
+
+    Empty tuple if the adapter is unknown. Mirrors `get_supported_reasoning_efforts`
+    in spirit — small pure helper that callers can rely on for picker UIs.
+    """
+    if runtime_adapter is None:
+        return ()
+    adapter_value = runtime_adapter.value if isinstance(runtime_adapter, RuntimeAdapter) else runtime_adapter
+    if adapter_value == RuntimeAdapter.CLAUDE.value:
+        return tuple(CLAUDE_REASONING_EFFORTS_BY_MODEL.keys())
+    if adapter_value == RuntimeAdapter.CODEX.value:
+        return CODEX_MODELS
+    return ()
+
+
+def get_picker_choices() -> tuple[PickerAdapter, ...]:
+    """Return the full picker tree (adapters → models → supported efforts).
+
+    Single call any settings UI can make to drive a runtime / model / effort
+    selector. Display labels fall back to the raw identifier when missing so a
+    new model that's added to `CLAUDE_REASONING_EFFORTS_BY_MODEL` or
+    `CODEX_MODELS` without a matching entry in `MODEL_DISPLAY_NAMES` still
+    surfaces (rather than silently disappearing).
+    """
+    adapters: list[PickerAdapter] = []
+    for adapter in RuntimeAdapter:
+        models: list[PickerModel] = []
+        for model in get_models_for_runtime_adapter(adapter):
+            efforts = tuple(
+                PickerEffort(value=e.value, label=REASONING_EFFORT_DISPLAY_NAMES.get(e.value, e.value))
+                for e in get_supported_reasoning_efforts(adapter, model)
+            )
+            models.append(
+                PickerModel(
+                    value=model,
+                    label=MODEL_DISPLAY_NAMES.get(model, model),
+                    supported_efforts=efforts,
+                )
+            )
+        adapters.append(
+            PickerAdapter(
+                value=adapter.value,
+                label=RUNTIME_ADAPTER_DISPLAY_NAMES.get(adapter.value, adapter.value),
+                models=tuple(models),
+            )
+        )
+    return tuple(adapters)
+
 
 def get_provider_for_runtime_adapter(
     runtime_adapter: RuntimeAdapter | str | None,

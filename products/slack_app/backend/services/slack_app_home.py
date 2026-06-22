@@ -46,40 +46,58 @@ MODAL_BLOCK_REASONING_EFFORT = "block_reasoning_effort"
 EditScope = Literal["personal", "workspace"]
 
 
-# Display labels. Kept separate from enum values so the user-facing copy can be
-# tuned without touching the storage values.
-RUNTIME_ADAPTER_LABELS: dict[str, str] = {
-    "claude": "Claude (Anthropic)",
-    "codex": "Codex (OpenAI)",
-}
-
-REASONING_EFFORT_LABELS: dict[str, str] = {
-    "low": "Low",
-    "medium": "Medium",
-    "high": "High",
-    "xhigh": "Extra high",
-    "max": "Max",
-}
+# Picker data (adapters, model lists, display labels) all comes from the tasks
+# product via `products.tasks.backend.facade.run_config`. The imports are
+# deferred to call time on purpose — at module load the slack_app api.py is
+# imported by Django startup, and the facade module pulls
+# `tasks.backend.temporal.process_task.utils` which transitively loads the
+# tasks temporal package. In production that's fine; in tests the env config
+# rejects it, and the resolver/handler tests already stub the underlying
+# module. Lazy imports keep the slack_app side honest about what it actually
+# needs at module-load time (nothing from the tasks runtime).
 
 
-# Picker contents. The model lists mirror the keys of
-# `CLAUDE_REASONING_EFFORTS_BY_MODEL` / `CODEX_*` in the tasks product, but are
-# duplicated here so the slack_app's Django app load doesn't drag in the tasks
-# temporal package. Add a new model here when it ships in the tasks runtime.
-MODELS_BY_RUNTIME_ADAPTER: dict[str, list[tuple[str, str]]] = {
-    "claude": [
-        ("claude-opus-4-7", "Claude Opus 4.7"),
-        ("claude-opus-4-6", "Claude Opus 4.6"),
-        ("claude-opus-4-5", "Claude Opus 4.5"),
-        ("claude-opus-4-8", "Claude Opus 4.8"),
-        ("claude-fable-5", "Claude Fable 5"),
-        ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
-    ],
-    "codex": [
-        ("gpt-5", "GPT-5"),
-        ("gpt-5.5", "GPT-5.5"),
-    ],
-}
+def _picker_choices() -> tuple[Any, ...]:
+    from products.tasks.backend.facade.run_config import get_picker_choices
+
+    return get_picker_choices()
+
+
+def _runtime_adapter_label(value: str | None) -> str:
+    if not value:
+        return "—"
+    from products.tasks.backend.facade.run_config import RUNTIME_ADAPTER_DISPLAY_NAMES
+
+    return RUNTIME_ADAPTER_DISPLAY_NAMES.get(value, value)
+
+
+def _reasoning_effort_label(value: str | None) -> str:
+    if not value:
+        return "—"
+    from products.tasks.backend.facade.run_config import REASONING_EFFORT_DISPLAY_NAMES
+
+    return REASONING_EFFORT_DISPLAY_NAMES.get(value, value)
+
+
+def _model_label_lookup(model: str | None) -> str:
+    if not model:
+        return "—"
+    from products.tasks.backend.facade.run_config import MODEL_DISPLAY_NAMES
+
+    return MODEL_DISPLAY_NAMES.get(model, model)
+
+
+def _models_for(runtime_adapter: str) -> tuple[tuple[str, str], ...]:
+    """Return `(value, label)` pairs for the modal's model dropdown."""
+    for adapter in _picker_choices():
+        if adapter.value == runtime_adapter:
+            return tuple((m.value, m.label) for m in adapter.models)
+    return ()
+
+
+def _runtime_adapter_options() -> tuple[tuple[str, str], ...]:
+    """Return `(value, label)` pairs for the modal's runtime dropdown."""
+    return tuple((a.value, a.label) for a in _picker_choices())
 
 
 @dataclass(frozen=True)
@@ -183,12 +201,10 @@ def _active_model_blocks(effective: AIPreferences, source: PreferenceSource) -> 
             },
         ]
 
-    runtime_label = RUNTIME_ADAPTER_LABELS.get(effective.runtime_adapter or "", effective.runtime_adapter or "—")
-    model_label = _model_label(effective.runtime_adapter, effective.model)
+    runtime_label = _runtime_adapter_label(effective.runtime_adapter)
+    model_label = _model_label_lookup(effective.model)
     effort_part = (
-        f" · Reasoning: *{REASONING_EFFORT_LABELS.get(effective.reasoning_effort, effective.reasoning_effort)}*"
-        if effective.reasoning_effort
-        else ""
+        f" · Reasoning: *{_reasoning_effort_label(effective.reasoning_effort)}*" if effective.reasoning_effort else ""
     )
     return [
         {
@@ -301,23 +317,12 @@ def _row_summary(row: SlackSettings | None) -> str:
     if not row or not row.ai_runtime_adapter or not row.ai_model:
         return "_(none)_"
     parts = [
-        f"*Model:* {_model_label(row.ai_runtime_adapter, row.ai_model)}",
-        f"*Runtime:* {RUNTIME_ADAPTER_LABELS.get(row.ai_runtime_adapter, row.ai_runtime_adapter)}",
+        f"*Model:* {_model_label_lookup(row.ai_model)}",
+        f"*Runtime:* {_runtime_adapter_label(row.ai_runtime_adapter)}",
     ]
     if row.ai_reasoning_effort:
-        parts.append(f"*Reasoning:* {REASONING_EFFORT_LABELS.get(row.ai_reasoning_effort, row.ai_reasoning_effort)}")
+        parts.append(f"*Reasoning:* {_reasoning_effort_label(row.ai_reasoning_effort)}")
     return " · ".join(parts)
-
-
-def _model_label(runtime_adapter: str | None, model: str | None) -> str:
-    if not model:
-        return "—"
-    if not runtime_adapter:
-        return model
-    for value, label in MODELS_BY_RUNTIME_ADAPTER.get(runtime_adapter, []):
-        if value == model:
-            return label
-    return model
 
 
 # ---------------------------------------------------------------------------
@@ -343,12 +348,13 @@ def render_edit_modal(
     callback_id = EDIT_MODAL_PERSONAL_CALLBACK_ID if scope == "personal" else EDIT_MODAL_WORKSPACE_CALLBACK_ID
     title = "AI settings (personal)" if scope == "personal" else "AI settings (workspace)"
 
+    runtime_pairs = _runtime_adapter_options()
     runtime_options = [
         {
             "text": {"type": "plain_text", "text": label, "emoji": True},
             "value": value,
         }
-        for value, label in RUNTIME_ADAPTER_LABELS.items()
+        for value, label in runtime_pairs
     ]
     runtime_element: dict[str, Any] = {
         "type": "static_select",
@@ -356,7 +362,7 @@ def render_edit_modal(
         "placeholder": {"type": "plain_text", "text": "Pick a runtime"},
         "options": runtime_options,
     }
-    if current.runtime_adapter and current.runtime_adapter in RUNTIME_ADAPTER_LABELS:
+    if current.runtime_adapter and any(v == current.runtime_adapter for v, _ in runtime_pairs):
         runtime_element["initial_option"] = next(o for o in runtime_options if o["value"] == current.runtime_adapter)
     runtime_block: dict[str, Any] = {
         "type": "input",
@@ -373,7 +379,7 @@ def render_edit_modal(
                 "text": {"type": "plain_text", "text": label, "emoji": True},
                 "value": value,
             }
-            for value, label in MODELS_BY_RUNTIME_ADAPTER.get(current.runtime_adapter, [])
+            for value, label in _models_for(current.runtime_adapter)
         ]
         if model_options:
             model_element: dict[str, Any] = {
@@ -396,7 +402,7 @@ def render_edit_modal(
     if supported_efforts:
         effort_options = [
             {
-                "text": {"type": "plain_text", "text": REASONING_EFFORT_LABELS.get(v, v), "emoji": True},
+                "text": {"type": "plain_text", "text": _reasoning_effort_label(v), "emoji": True},
                 "value": v,
             }
             for v in supported_efforts

@@ -136,7 +136,7 @@ def _pick_reasoning_effort(
     saved `high` while on a thinking model and then switched to a non-thinking
     one) it is silently dropped rather than passed through and rejected later.
     """
-    from products.tasks.backend.temporal.process_task.utils import get_supported_reasoning_efforts
+    from products.tasks.backend.facade.run_config import get_supported_reasoning_efforts
 
     supported = {e.value for e in get_supported_reasoning_efforts(runtime_adapter, model)}
     if not supported:
@@ -191,7 +191,7 @@ def validate_ai_preferences(
     """
     from django.core.exceptions import ValidationError
 
-    from products.tasks.backend.temporal.process_task.utils import (
+    from products.tasks.backend.facade.run_config import (
         PUBLIC_REASONING_EFFORTS,
         RuntimeAdapter,
         get_reasoning_effort_error,

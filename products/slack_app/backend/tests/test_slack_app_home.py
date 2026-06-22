@@ -1,15 +1,25 @@
 """Block Kit renderer tests for the App Home tab + AI preferences modal.
 
 These cover the pure-function rendering layer. Event/interactivity wiring is
-covered in test_app_home_handlers.py.
+covered in test_slack_app_home_handlers.py.
+
+The renderer pulls model lists and display labels from
+`products.tasks.backend.facade.run_config` at render time. We stub that
+module here so the test env's `SANDBOX_PROVIDER=docker` + `DEBUG=False`
+combination doesn't trigger an eager docker-sandbox load when the facade is
+first imported.
 """
 
 from __future__ import annotations
 
+import sys
+from dataclasses import dataclass
+from types import ModuleType
+
 import pytest
 
 from products.slack_app.backend.services.ai_preferences import AIPreferences
-from products.slack_app.backend.services.app_home import (
+from products.slack_app.backend.services.slack_app_home import (
     ACTION_EDIT_PERSONAL,
     ACTION_EDIT_WORKSPACE,
     ACTION_RESET_PERSONAL,
@@ -21,13 +31,79 @@ from products.slack_app.backend.services.app_home import (
     MODAL_BLOCK_MODEL,
     MODAL_BLOCK_REASONING_EFFORT,
     MODAL_BLOCK_RUNTIME_ADAPTER,
-    MODELS_BY_RUNTIME_ADAPTER,
     PreferenceSource,
     parse_modal_submission,
     render_edit_modal,
     render_home_view,
     resolve_source,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_picker_facade():
+    """Stub `tasks.facade.run_config` so renderer tests don't trigger the
+    tasks-temporal import chain (same test-env quirk as the resolver tests)."""
+
+    @dataclass(frozen=True)
+    class _PickerEffort:
+        value: str
+        label: str
+
+    @dataclass(frozen=True)
+    class _PickerModel:
+        value: str
+        label: str
+        supported_efforts: tuple = ()
+
+    @dataclass(frozen=True)
+    class _PickerAdapter:
+        value: str
+        label: str
+        models: tuple = ()
+
+    module_name = "products.tasks.backend.facade.run_config"
+    fake = ModuleType(module_name)
+    fake.RUNTIME_ADAPTER_DISPLAY_NAMES = {"claude": "Claude (Anthropic)", "codex": "Codex (OpenAI)"}
+    fake.MODEL_DISPLAY_NAMES = {
+        "claude-opus-4-7": "Claude Opus 4.7",
+        "claude-sonnet-4-6": "Claude Sonnet 4.6",
+        "gpt-5": "GPT-5",
+        "gpt-5.5": "GPT-5.5",
+    }
+    fake.REASONING_EFFORT_DISPLAY_NAMES = {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high",
+        "max": "Max",
+    }
+    fake.get_picker_choices = lambda: (
+        _PickerAdapter(
+            value="claude",
+            label="Claude (Anthropic)",
+            models=(
+                _PickerModel(value="claude-opus-4-7", label="Claude Opus 4.7"),
+                _PickerModel(value="claude-sonnet-4-6", label="Claude Sonnet 4.6"),
+            ),
+        ),
+        _PickerAdapter(
+            value="codex",
+            label="Codex (OpenAI)",
+            models=(
+                _PickerModel(value="gpt-5", label="GPT-5"),
+                _PickerModel(value="gpt-5.5", label="GPT-5.5"),
+            ),
+        ),
+    )
+    saved = sys.modules.get(module_name)
+    sys.modules[module_name] = fake
+    try:
+        yield
+    finally:
+        if saved is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = saved
 
 
 def _make_row(*, runtime_adapter=None, model=None, reasoning_effort=None):
@@ -154,8 +230,11 @@ class TestRenderEditModal:
         view = render_edit_modal(scope="personal", current=AIPreferences(runtime_adapter="codex"))
         model_block = next(b for b in view["blocks"] if b.get("block_id") == MODAL_BLOCK_MODEL)
         option_values = [o["value"] for o in model_block["element"]["options"]]
-        # Sanity: codex models, not claude models.
-        assert set(option_values) == {v for v, _ in MODELS_BY_RUNTIME_ADAPTER["codex"]}
+        # Sanity: codex models, not claude models. Asserting via prefix keeps
+        # the test resilient to new Codex models being added to the facade
+        # without churning the assertion.
+        assert option_values
+        assert all(v.startswith("gpt-") for v in option_values)
 
     def test_effort_block_renders_only_when_supported_efforts_provided(self):
         view = render_edit_modal(

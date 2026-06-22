@@ -25,7 +25,7 @@ from products.slack_app.backend.services.ai_preferences import (
     resolve_ai_preferences,
     validate_ai_preferences,
 )
-from products.slack_app.backend.services.app_home import (
+from products.slack_app.backend.services.slack_app_home import (
     ACTION_EDIT_PERSONAL,
     ACTION_EDIT_WORKSPACE,
     ACTION_RESET_PERSONAL,
@@ -287,7 +287,7 @@ def _update_modal_after_input_change(payload: dict) -> HttpResponse:
 def _supported_efforts(runtime_adapter: str | None, model: str | None) -> list[str] | None:
     if not runtime_adapter or not model:
         return None
-    from products.tasks.backend.temporal.process_task.utils import get_supported_reasoning_efforts
+    from products.tasks.backend.facade.run_config import get_supported_reasoning_efforts
 
     return [e.value for e in get_supported_reasoning_efforts(runtime_adapter, model)] or None
 
@@ -358,7 +358,7 @@ def _modal_error_response(message: str) -> JsonResponse:
     Slack expects `response_action=errors` with a `block_id`-keyed errors map.
     We attach the error to the runtime block so it's visible without scrolling.
     """
-    from products.slack_app.backend.services.app_home import MODAL_BLOCK_RUNTIME_ADAPTER
+    from products.slack_app.backend.services.slack_app_home import MODAL_BLOCK_RUNTIME_ADAPTER
 
     return JsonResponse(
         {

@@ -50,16 +50,17 @@ def flag_off():
 
 @pytest.fixture(autouse=True)
 def _stub_task_runtime_helpers():
-    """Replace the lazy task-runtime imports with a minimal stub.
+    """Replace the lazy tasks-facade imports with a minimal stub.
 
-    Importing `products.tasks.backend.temporal.process_task.utils` triggers
-    `tasks.backend.temporal.__init__.py`, which eagerly loads the docker
-    sandbox class. The test env sets `SANDBOX_PROVIDER=docker` alongside
-    `DEBUG=False`, a combination the sandbox module rejects at import time —
-    a test-only collision. Production runs with `SANDBOX_PROVIDER=modal`, so
-    the real lazy import path works there. Stubbing the lookups here keeps
-    the resolver tests focused on resolver logic without dragging in the
-    tasks-temporal import chain.
+    Slack handler code imports `products.tasks.backend.facade.run_config`,
+    which re-exports from `products.tasks.backend.temporal.process_task.utils`.
+    Loading either pulls in `tasks.backend.temporal.__init__.py`, which
+    eagerly loads the docker sandbox class. The test env sets
+    `SANDBOX_PROVIDER=docker` alongside `DEBUG=False` — a combination the
+    sandbox module rejects at import time. Production runs
+    `SANDBOX_PROVIDER=modal`, so the real lazy import path works there.
+    Stubbing the facade module here keeps these tests focused on resolver
+    logic without dragging the tasks-temporal import chain in.
     """
     supported_by_model = {
         ("claude", "claude-opus-4-7"): {"low", "medium", "high", "xhigh", "max"},
@@ -109,21 +110,22 @@ def _stub_task_runtime_helpers():
     import sys
     from types import ModuleType
 
-    fake = ModuleType("products.tasks.backend.temporal.process_task.utils")
+    module_name = "products.tasks.backend.facade.run_config"
+    fake = ModuleType(module_name)
     fake.get_supported_reasoning_efforts = fake_get_supported
     fake.get_reasoning_effort_error = fake_get_error
     fake.RuntimeAdapter = _RuntimeAdapter()
     fake.PUBLIC_REASONING_EFFORTS = public_efforts
 
-    saved = sys.modules.get("products.tasks.backend.temporal.process_task.utils")
-    sys.modules["products.tasks.backend.temporal.process_task.utils"] = fake
+    saved = sys.modules.get(module_name)
+    sys.modules[module_name] = fake
     try:
         yield
     finally:
         if saved is None:
-            del sys.modules["products.tasks.backend.temporal.process_task.utils"]
+            sys.modules.pop(module_name, None)
         else:
-            sys.modules["products.tasks.backend.temporal.process_task.utils"] = saved
+            sys.modules[module_name] = saved
 
 
 class TestResolveAIPreferences:
