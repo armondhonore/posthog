@@ -137,3 +137,22 @@ class ExternalAccountUpdateResult:
     account: ExternalAccount | None = None
     error: ExternalAccountUpdateError | None = None
     error_field: str | None = None
+
+
+@dataclass(frozen=True)
+class CustomPropertyValue:
+    """An account's value for a custom property.
+
+    ``value`` is the native typed value, read from whichever ``value_*`` column the property's
+    ``data_type`` maps to (the model's CHECK guarantees exactly one is set). ``data_type`` is the
+    definition's derived category ('string', 'numeric', 'boolean', 'datetime') so callers know how
+    to render ``value``.
+    """
+
+    id: UUID
+    account_id: UUID
+    definition_id: UUID
+    value: float | bool | str | datetime | None
+    data_type: str
+    created_at: datetime
+    created_by_id: int | None

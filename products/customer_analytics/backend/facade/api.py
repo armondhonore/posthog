@@ -15,7 +15,8 @@ Do NOT:
 - Import DRF, serializers, or HTTP concerns
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -29,10 +30,11 @@ from posthog.models.tagged_item import TaggedItem
 
 from products.customer_analytics.backend.account_urls import build_account_deeplink as build_account_deeplink
 from products.customer_analytics.backend.constants import ACCOUNT_ASSIGNMENT_ROLE_FIELDS
+from products.customer_analytics.backend.logic import custom_property_values as _custom_property_values_logic
 from products.customer_analytics.backend.logic.usage_spike_notifications import (
     notify_managers_of_usage_spike as notify_managers_of_usage_spike,
 )
-from products.customer_analytics.backend.models import Account
+from products.customer_analytics.backend.models import Account, CustomPropertyValue
 from products.customer_analytics.backend.models.account import AccountProperties as _ModelAccountProperties
 from products.notebooks.backend.models import Notebook, ResourceNotebook
 
@@ -334,3 +336,48 @@ def update_external_account(
 
     account.refresh_from_db()
     return contracts.ExternalAccountUpdateResult(account=_to_external_account(account))
+
+
+# --- Custom property values ---
+
+
+def _to_custom_property_value(row: CustomPropertyValue) -> contracts.CustomPropertyValue:
+    return contracts.CustomPropertyValue(
+        id=row.id,
+        account_id=row.account_id,
+        definition_id=row.definition_id,
+        value=_custom_property_values_logic.value_of(row),
+        data_type=row.definition.data_type.value,
+        created_at=row.created_at,
+        created_by_id=row.created_by_id,
+    )
+
+
+def set_custom_property_value(
+    team_id: int,
+    account_id: str | UUID,
+    definition_id: str | UUID,
+    value: Any,
+    *,
+    created_by_id: int | None = None,
+) -> contracts.CustomPropertyValue:
+    """Set an account's value for a custom property, returning the stored row as a contract.
+
+    Delegates type validation, the soft-delete + insert transaction, and the append-only history
+    invariant to logic. Propagates ``CustomPropertyDefinition.DoesNotExist`` / ``Account.DoesNotExist``
+    / ``InvalidCustomPropertyValue`` for the caller (presentation, Max tool) to handle.
+    """
+    row = _custom_property_values_logic.set_custom_property_value(
+        team_id=team_id,
+        account_id=account_id,
+        definition_id=definition_id,
+        value=value,
+        created_by_id=created_by_id,
+    )
+    return _to_custom_property_value(row)
+
+
+def list_active_custom_property_values(team_id: int, account_id: str | UUID) -> list[contracts.CustomPropertyValue]:
+    """The account's current (non-deleted) custom property values as contracts, newest first."""
+    rows = _custom_property_values_logic.list_active_custom_property_values(team_id=team_id, account_id=account_id)
+    return [_to_custom_property_value(row) for row in rows]
