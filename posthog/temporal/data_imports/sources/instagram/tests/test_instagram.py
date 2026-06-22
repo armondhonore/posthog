@@ -1,4 +1,6 @@
 import datetime as dt
+from collections.abc import Iterable
+from typing import Any, cast
 
 import pytest
 from unittest import mock
@@ -242,7 +244,7 @@ def test_source_raises_when_no_accounts(monkeypatch):
     manager, _ = _setup_source(monkeypatch, [])
     response = instagram_source(config=_config(), resource_name="users", team_id=1, resumable_source_manager=manager)
     with pytest.raises(Exception, match="No Instagram professional account"):
-        list(response.items())
+        list(cast(Iterable[Any], response.items()))
 
 
 def test_users_stream_yields_one_row_per_account(monkeypatch):
@@ -255,7 +257,7 @@ def test_users_stream_yields_one_row_per_account(monkeypatch):
     monkeypatch.setattr(ig, "_graph_get", fake_graph_get)
 
     response = instagram_source(config=_config(), resource_name="users", team_id=1, resumable_source_manager=manager)
-    batches = list(response.items())
+    batches = list(cast(Iterable[Any], response.items()))
 
     assert len(batches) == 2
     assert batches[0][0]["id"] == ACCOUNT["id"]
@@ -282,7 +284,7 @@ def test_media_stream_paginates_and_saves_token_free_state(monkeypatch):
     monkeypatch.setattr(ig, "_graph_get", fake_graph_get)
 
     response = instagram_source(config=_config(), resource_name="media", team_id=1, resumable_source_manager=manager)
-    batches = list(response.items())
+    batches = list(cast(Iterable[Any], response.items()))
 
     assert [row["id"] for batch in batches for row in batch] == ["m1", "m2"]
     assert all(row["account_id"] == ACCOUNT["id"] for batch in batches for row in batch)
@@ -312,7 +314,7 @@ def test_media_stream_passes_since_for_incremental(monkeypatch):
         should_use_incremental_field=True,
         db_incremental_field_last_value=dt.datetime(2026, 4, 15, tzinfo=dt.UTC),
     )
-    list(response.items())
+    list(cast(Iterable[Any], response.items()))
 
     assert calls[0]["since"] == 1776211200
 
@@ -331,7 +333,7 @@ def test_media_stream_resumes_from_saved_cursor(monkeypatch):
     monkeypatch.setattr(ig, "_graph_get", fake_graph_get)
 
     response = instagram_source(config=_config(), resource_name="media", team_id=1, resumable_source_manager=manager)
-    list(response.items())
+    list(cast(Iterable[Any], response.items()))
 
     # The first account is skipped entirely; the second starts at the saved cursor.
     assert calls == ["https://graph.facebook.com/v25.0/456/media?after=xyz"]
@@ -349,7 +351,7 @@ def test_media_resume_ignored_when_account_gone(monkeypatch):
     monkeypatch.setattr(ig, "_graph_get", fake_graph_get)
 
     response = instagram_source(config=_config(), resource_name="media", team_id=1, resumable_source_manager=manager)
-    list(response.items())
+    list(cast(Iterable[Any], response.items()))
 
     assert calls == [f"{ig.GRAPH_API_BASE}/{ACCOUNT['id']}/media"]
 
@@ -359,7 +361,7 @@ def test_stories_stream_never_saves_resume_state(monkeypatch):
     monkeypatch.setattr(ig, "_graph_get", lambda url, params: {"data": [{"id": "s1"}]})
 
     response = instagram_source(config=_config(), resource_name="stories", team_id=1, resumable_source_manager=manager)
-    batches = list(response.items())
+    batches = list(cast(Iterable[Any], response.items()))
 
     assert batches[0][0]["id"] == "s1"
     assert saved_states == []
@@ -393,7 +395,7 @@ def test_user_insights_iterates_windows_per_metric(monkeypatch):
         should_use_incremental_field=True,
         db_incremental_field_last_value=dt.date(2026, 4, 25),
     )
-    batches = list(response.items())
+    batches = list(cast(Iterable[Any], response.items()))
 
     # Incremental: both metrics start at last value minus the lookback → one window each.
     assert [c["metric"] for c in calls] == ["reach", "follower_count"]
@@ -424,7 +426,7 @@ def test_user_insights_resume_skips_completed_metrics_and_windows(monkeypatch):
     response = instagram_source(
         config=_config(), resource_name="user_insights", team_id=1, resumable_source_manager=manager
     )
-    list(response.items())
+    list(cast(Iterable[Any], response.items()))
 
     # `reach` was already completed before the crash; follower_count resumes at its window.
     assert all(c["metric"] == "follower_count" for c in calls)
@@ -446,7 +448,7 @@ def test_user_insights_full_refresh_respects_metric_floors(monkeypatch):
     response = instagram_source(
         config=_config(), resource_name="user_insights", team_id=1, resumable_source_manager=manager
     )
-    list(response.items())
+    list(cast(Iterable[Any], response.items()))
 
     reach_calls = [c for c in calls if c["metric"] == "reach"]
     follower_calls = [c for c in calls if c["metric"] == "follower_count"]
@@ -492,9 +494,11 @@ def test_get_access_token_refreshes_stale_db_connection(monkeypatch):
     integration.errors = ""
     integration.sensitive_config = {"access_token": "token-123"}
 
-    monkeypatch.setattr(
-        ig.Integration.objects, "get", lambda **kw: calls.append("Integration.objects.get") or integration
-    )
+    def fake_get(**kw):
+        calls.append("Integration.objects.get")
+        return integration
+
+    monkeypatch.setattr(ig.Integration.objects, "get", fake_get)
     monkeypatch.setattr(ig.InstagramIntegration, "refresh_access_token", lambda self: calls.append("refresh"))
 
     token = ig.get_access_token(integration_id=1, team_id=1)

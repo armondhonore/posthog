@@ -1,7 +1,7 @@
 import pytest
 from unittest import mock
 
-from posthog.schema import ReleaseStatus
+from posthog.schema import ReleaseStatus, SourceFieldOauthConfig
 
 from posthog.temporal.data_imports.sources.generated_configs import InstagramSourceConfig
 from posthog.temporal.data_imports.sources.instagram.instagram import InstagramResumeConfig
@@ -32,6 +32,7 @@ def test_get_source_config_fields():
 def test_get_source_config_oauth_field_declares_required_scopes():
     cfg = InstagramSource().get_source_config
     oauth_field = cfg.fields[0]
+    assert isinstance(oauth_field, SourceFieldOauthConfig)
     assert oauth_field.kind == "instagram"
     assert oauth_field.requiredScopes == (
         "instagram_basic,instagram_manage_insights,pages_show_list,pages_read_engagement"
