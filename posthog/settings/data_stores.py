@@ -359,6 +359,19 @@ CLICKHOUSE_OPS_CLUSTER: str = os.getenv("CLICKHOUSE_OPS_CLUSTER", "ops")
 # respect their declared NodeRole(s) instead of being collapsed to NodeRole.ALL,
 # so a per-cluster topology can actually exercise routing.
 MULTINODE_CLICKHOUSE: bool = get_from_env("MULTINODE_CLICKHOUSE", False, type_cast=str_to_bool)
+
+# Single-node mode: run PostHog against a stock single ClickHouse with NO cluster,
+# NO Keeper, and NO replication. Distinct from MULTINODE_CLICKHOUSE (which still
+# assumes a 1-node *cluster* is configured). When enabled, every cluster reference
+# is pointed at ClickHouse's built-in single-node `default` cluster (always present
+# in the shipped config.xml — one shard/replica on localhost), so Distributed
+# engines and cluster host discovery resolve locally; the engine layer additionally
+# drops `ON CLUSTER` DDL and replication (see ON_CLUSTER_CLAUSE / MergeTreeEngine).
+# Off by default — the clustered path is byte-for-byte unchanged. The actual
+# cluster-name overrides are applied at the end of this module, after every
+# CLICKHOUSE_*_CLUSTER setting has been defined.
+CLICKHOUSE_SINGLE_NODE: bool = get_from_env("CLICKHOUSE_SINGLE_NODE", False, type_cast=str_to_bool)
+
 CLICKHOUSE_FALLBACK_CANCEL_QUERY_ON_CLUSTER = get_from_env(
     "CLICKHOUSE_FALLBACK_CANCEL_QUERY_ON_CLUSTER", default=False, type_cast=str_to_bool
 )
@@ -406,6 +419,23 @@ CLICKHOUSE_LOGS_CLUSTER_SECURE: bool = get_from_env(
 CLICKHOUSE_LOGS_ENABLE_STORAGE_POLICY: bool = get_from_env(
     "CLICKHOUSE_LOGS_ENABLE_STORAGE_POLICY", False, type_cast=str_to_bool
 )
+
+# Single-node mode (see CLICKHOUSE_SINGLE_NODE above): point EVERY cluster-name
+# setting at ClickHouse's built-in single-node `default` cluster and clear the
+# satellite list, so Distributed engines and cluster host-discovery resolve
+# locally on a stock ClickHouse. Applied here, after all CLICKHOUSE_*_CLUSTER
+# settings are defined.
+if CLICKHOUSE_SINGLE_NODE:
+    CLICKHOUSE_CLUSTER = "default"
+    CLICKHOUSE_MIGRATIONS_CLUSTER = "default"
+    CLICKHOUSE_SINGLE_SHARD_CLUSTER = "default"
+    CLICKHOUSE_WRITABLE_CLUSTER = "default"
+    CLICKHOUSE_PRIMARY_REPLICA_CLUSTER = "default"
+    CLICKHOUSE_AUX_CLUSTER = "default"
+    CLICKHOUSE_AI_EVENTS_CLUSTER = "default"
+    CLICKHOUSE_OPS_CLUSTER = "default"
+    CLICKHOUSE_LOGS_CLUSTER = "default"
+    CLICKHOUSE_SATELLITE_CLUSTERS = []
 
 CLICKHOUSE_KAFKA_NAMED_COLLECTION: str = os.getenv("CLICKHOUSE_KAFKA_NAMED_COLLECTION", "msk_cluster")
 CLICKHOUSE_KAFKA_WARPSTREAM_INGESTION_NAMED_COLLECTION: str = os.getenv(

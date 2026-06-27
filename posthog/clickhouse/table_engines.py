@@ -39,6 +39,12 @@ class MergeTreeEngine:
     def __str__(self):
         replication_scheme = self.replication_scheme
 
+        # Single-node mode: no Keeper, so never emit a Replicated* engine. Every
+        # scheme collapses to the plain (non-replicated) MergeTree variant on the
+        # single node.
+        if settings.CLICKHOUSE_SINGLE_NODE:
+            return self.ENGINE.format(**self.kwargs)
+
         if replication_scheme == ReplicationScheme.NOT_SHARDED:
             return self.ENGINE.format(**self.kwargs)
 

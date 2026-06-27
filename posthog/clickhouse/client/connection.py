@@ -145,6 +145,23 @@ class ProxyClient:
         types_check=False,
         columnar=False,
     ):
+        # Single-node mode: strip any literal `ON CLUSTER` so DDL run via the pooled
+        # client (e.g. some ALTER migrations) executes locally. Lazy import avoids a
+        # circular import (cluster.py imports this module). No-op otherwise.
+        from posthog.clickhouse.cluster import strip_on_cluster_if_single_node
+
+        query = strip_on_cluster_if_single_node(query)
+
+        # Single-node mode: some tables declare TTLs on DateTime64 columns, which
+        # stock ClickHouse rejects unless this is set. (`settings` here is the query-
+        # settings param, so read the Django setting under an alias.)
+        from django.conf import settings as _dj_settings
+
+        if _dj_settings.CLICKHOUSE_SINGLE_NODE:
+            if settings is None:
+                settings = {}
+            settings.setdefault("allow_suspicious_ttl_expressions", 1)
+
         if query_id:
             if settings is None:
                 settings = {}
@@ -316,6 +333,10 @@ def _make_ch_pool(*, client_settings: Mapping[str, str] | None = None, **overrid
         "connections_max": settings.CLICKHOUSE_CONN_POOL_MAX,
         "settings": {
             **({"mutations_sync": "1"} if settings.TEST else {}),
+            # Single-node mode: some tables declare TTLs on DateTime64 columns, which
+            # stock ClickHouse rejects unless this is set. Applied to the native pool
+            # client used by ClickhouseCluster (the migration execution path).
+            **({"allow_suspicious_ttl_expressions": "1"} if settings.CLICKHOUSE_SINGLE_NODE else {}),
             **(client_settings or {}),
         },
         # Without this, OPTIMIZE table and other queries will regularly run into timeouts

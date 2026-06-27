@@ -44,7 +44,34 @@ logger = _LazyDagsterLogger()
 
 
 def ON_CLUSTER_CLAUSE(on_cluster=True):
+    # Single-node mode has no cluster and no Keeper, so the distributed-DDL queue
+    # that `ON CLUSTER` depends on isn't available — emit plain local DDL instead.
+    if settings.CLICKHOUSE_SINGLE_NODE:
+        return ""
     return f"ON CLUSTER '{CLICKHOUSE_CLUSTER}'" if on_cluster else ""
+
+
+# Matches an ` ON CLUSTER <name>` clause (quoted, backticked, or a bareword/
+# placeholder), with surrounding whitespace, anywhere in a statement.
+_ON_CLUSTER_CLAUSE_RE = re.compile(
+    r"\s+ON\s+CLUSTER\s+(?:'[^']*'|\"[^\"]*\"|`[^`]*`|[A-Za-z0-9_.{}]+)",
+    re.IGNORECASE,
+)
+
+
+def strip_on_cluster_if_single_node(sql: str) -> str:
+    """Single-node safety net for the migration/DDL path.
+
+    Many migrations and helpers embed `ON CLUSTER <cluster>` as a literal string
+    rather than going through ON_CLUSTER_CLAUSE(). In single-node mode there is no
+    cluster and no Keeper, so any `ON CLUSTER` clause makes ClickHouse reach for the
+    distributed-DDL queue and fail. Strip the clause centrally at the execution
+    boundary so DDL runs locally. No-op when not single-node, or when the statement
+    has no `ON CLUSTER`.
+    """
+    if not settings.CLICKHOUSE_SINGLE_NODE or not isinstance(sql, str) or "ON CLUSTER" not in sql.upper():
+        return sql
+    return _ON_CLUSTER_CLAUSE_RE.sub("", sql)
 
 
 # Smoke-test only: when migrating against the multinode docker-compose stack
@@ -66,6 +93,12 @@ _MULTINODE_HOST_PORT_OVERRIDES: dict[str, tuple[str, int]] = {
 
 
 def _resolve_connection_target(host_name: str, port: int | None) -> tuple[str, int | None]:
+    if settings.CLICKHOUSE_SINGLE_NODE:
+        # The built-in `default` cluster advertises its member as `localhost`, which
+        # is only reachable from the ClickHouse node itself — not from other pods
+        # (web/migrate/celery). Route every discovered host to the reachable
+        # CLICKHOUSE_HOST service instead.
+        return (settings.CLICKHOUSE_HOST, None)
     if settings.MULTINODE_CLICKHOUSE:
         override = _MULTINODE_HOST_PORT_OVERRIDES.get(host_name)
         if override:
@@ -241,15 +274,29 @@ class ClickhouseCluster:
         self.__connection_overrides = dict(connection_overrides) if connection_overrides else {}
 
     def __get_cluster_hosts(self, client: Client, cluster: str, retry_policy: RetryPolicy | None = None):
-        get_cluster_hosts_fn = lambda client: client.execute(
-            f"""
-            SELECT host_name, port, shard_num, replica_num, getMacro('hostClusterType') as host_cluster_type, getMacro('hostClusterRole') as host_cluster_role
-            FROM clusterAllReplicas(%(name)s, system.clusters)
-            WHERE name = %(name)s and is_local
-            ORDER BY shard_num, replica_num
-            """,
-            {"name": cluster},
-        )
+        if settings.CLICKHOUSE_SINGLE_NODE:
+            # A vanilla single node defines no hostClusterType/hostClusterRole macros,
+            # so getMacro() would error. Skip them and treat the sole node as a DATA
+            # node (so it's assigned a shard and is a valid migration/query target).
+            get_cluster_hosts_fn = lambda client: client.execute(
+                f"""
+                SELECT host_name, port, shard_num, replica_num, NULL as host_cluster_type, '{NodeRole.DATA.value}' as host_cluster_role
+                FROM clusterAllReplicas(%(name)s, system.clusters)
+                WHERE name = %(name)s and is_local
+                ORDER BY shard_num, replica_num
+                """,
+                {"name": cluster},
+            )
+        else:
+            get_cluster_hosts_fn = lambda client: client.execute(
+                f"""
+                SELECT host_name, port, shard_num, replica_num, getMacro('hostClusterType') as host_cluster_type, getMacro('hostClusterRole') as host_cluster_role
+                FROM clusterAllReplicas(%(name)s, system.clusters)
+                WHERE name = %(name)s and is_local
+                ORDER BY shard_num, replica_num
+                """,
+                {"name": cluster},
+            )
 
         if retry_policy is not None:
             get_cluster_hosts_fn = retry_policy(get_cluster_hosts_fn)

@@ -302,6 +302,12 @@ def sync_execute(
     Raises:
     ClickHouseError: Custom wrapped ClickHouse error generated in case of query execution failure.
     """
+    # Single-node mode: strip any literal `ON CLUSTER` clause so DDL runs locally
+    # (no cluster/Keeper). No-op otherwise. Lazy import avoids a circular import.
+    from posthog.clickhouse.cluster import strip_on_cluster_if_single_node
+
+    query = strip_on_cluster_if_single_node(query)
+
     if not workload:
         workload = Workload.DEFAULT
         # TODO replace this by assert, sorry, no messing with ClickHouse should be possible

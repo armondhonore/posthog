@@ -6,7 +6,7 @@ from infi.clickhouse_orm import migrations
 
 from posthog import settings
 from posthog.clickhouse.client.connection import DATA_NODE_ROLES, SINGLE_SHARD_DATA_NODE_ROLES, NodeRole
-from posthog.clickhouse.cluster import ClickhouseCluster, Query, get_cluster
+from posthog.clickhouse.cluster import ClickhouseCluster, Query, get_cluster, strip_on_cluster_if_single_node
 from posthog.settings.data_stores import (
     CLICKHOUSE_CLUSTER,
     CLICKHOUSE_MIGRATIONS_CLUSTER,
@@ -64,6 +64,10 @@ def run_sql_with_exceptions(
         configuration, such as when the sharded flag is set for roles other than DATA.
     """
 
+    # Single-node mode: strip any literal `ON CLUSTER` so migration DDL runs locally
+    # (no cluster/Keeper). No-op otherwise.
+    sql = strip_on_cluster_if_single_node(sql)
+
     if node_roles and not isinstance(node_roles, list):
         node_roles = [node_roles]
 
@@ -72,9 +76,11 @@ def run_sql_with_exceptions(
     # Store original node_roles for validation purposes before debug override
     original_node_roles = node_roles_list
 
-    if (settings.E2E_TESTING or settings.DEBUG or not settings.CLOUD_DEPLOYMENT) and not settings.MULTINODE_CLICKHOUSE:
-        # In E2E tests, debug mode and hobby deployments, we run migrations on ALL nodes
-        # because we don't have different ClickHouse topologies yet in Docker.
+    if (
+        settings.E2E_TESTING or settings.DEBUG or not settings.CLOUD_DEPLOYMENT or settings.CLICKHOUSE_SINGLE_NODE
+    ) and not settings.MULTINODE_CLICKHOUSE:
+        # In E2E tests, debug mode, hobby deployments, and single-node mode we run
+        # migrations on ALL nodes because there's no distinct ClickHouse topology.
         # MULTINODE_CLICKHOUSE opts back into role-based routing so the smoke-test
         # stack can verify migrations actually land on the correct cluster.
         node_roles_list = [NodeRole.ALL]
@@ -82,11 +88,18 @@ def run_sql_with_exceptions(
     def run_migration():
         cluster = get_migrations_cluster()
 
-        query = Query(sql)
+        # Single-node mode: pass the setting per-query (the pool default isn't
+        # reliably applied through the cluster's execute path) so DDL with TTLs on
+        # DateTime64 columns is accepted on a stock ClickHouse.
+        query_settings = {"allow_suspicious_ttl_expressions": 1} if settings.CLICKHOUSE_SINGLE_NODE else None
+        query = Query(sql, settings=query_settings)
 
         if sharded and is_alter_on_replicated_table:
             is_local_or_test = (
-                settings.E2E_TESTING or settings.DEBUG or not settings.CLOUD_DEPLOYMENT
+                settings.E2E_TESTING
+                or settings.DEBUG
+                or not settings.CLOUD_DEPLOYMENT
+                or settings.CLICKHOUSE_SINGLE_NODE
             ) and not settings.MULTINODE_CLICKHOUSE
             single_role = node_roles_list[0] if len(node_roles_list) == 1 else None
             assert is_local_or_test or (single_role is not None and single_role in DATA_NODE_ROLES), (

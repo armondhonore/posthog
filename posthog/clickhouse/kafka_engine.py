@@ -100,6 +100,13 @@ def kafka_engine(
     use_named_collection: bool = True,
     named_collection: str | None = None,
 ) -> str:
+    # Single-node mode: PostHog Cloud's MSK/warpstream named collections don't
+    # exist on a stock ClickHouse, so connect to the local broker inline via
+    # KAFKA_HOSTS instead. One gate here covers every named-collection table.
+    if settings.CLICKHOUSE_SINGLE_NODE:
+        use_named_collection = False
+        if kafka_host is None:
+            kafka_host = ",".join(settings.KAFKA_HOSTS)
     if use_named_collection:
         assert kafka_host is None, "Can't set kafka_host when using named collection"
         # Use explicit named_collection if provided, otherwise default to MSK

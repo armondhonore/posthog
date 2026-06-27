@@ -56,12 +56,16 @@ class Command(BaseCommand):
         # Infi only creates the DB in one node, but not the rest. Create it before running migrations.
         self._create_database_if_not_exists(CLICKHOUSE_DATABASE, CLICKHOUSE_MIGRATIONS_CLUSTER)
         self._create_migration_tracking_tables_if_not_exist(CLICKHOUSE_DATABASE, CLICKHOUSE_MIGRATIONS_CLUSTER)
+        # Single-node mode: pass no cluster so infi creates plain local MergeTree
+        # tables (e.g. its MigrationHistory). With a cluster set, infi builds every
+        # table as ReplicatedMergeTree ON CLUSTER, which requires Keeper/ZooKeeper.
+        migrations_cluster = None if settings.CLICKHOUSE_SINGLE_NODE else CLICKHOUSE_MIGRATIONS_CLUSTER
         database = Database(
             CLICKHOUSE_DATABASE,
             db_url=host,
             username=CLICKHOUSE_USER,
             password=CLICKHOUSE_PASSWORD,
-            cluster=CLICKHOUSE_MIGRATIONS_CLUSTER,
+            cluster=migrations_cluster,
             verify_ssl_cert=False,
             randomize_replica_paths=settings.TEST or settings.E2E_TESTING,
             # don't use the egress proxy, clickhouse is internal
@@ -102,7 +106,11 @@ class Command(BaseCommand):
                 )
             print("Migrations done")
         else:
-            database.migrate(MIGRATIONS_PACKAGE_NAME, options["upto"], replicated=True)
+            # Single-node mode has no cluster/Keeper: use a plain (non-replicated)
+            # MigrationHistory table instead of MigrationHistoryReplicated, which
+            # would require ZooKeeper.
+            replicated = not settings.CLICKHOUSE_SINGLE_NODE
+            database.migrate(MIGRATIONS_PACKAGE_NAME, options["upto"], replicated=replicated)
             print("✅ Migration successful")
 
     def get_migrations(self, database, upto):
@@ -118,7 +126,10 @@ class Command(BaseCommand):
 
     @cached(cache={})
     def get_applied_migrations(self, database) -> set[str]:
-        return database._get_applied_migrations(MIGRATIONS_PACKAGE_NAME, replicated=True)
+        # Single-node mode has no cluster: use a plain local MigrationHistory table
+        # rather than the Distributed/Replicated one (which needs a cluster + Keeper).
+        replicated = not settings.CLICKHOUSE_SINGLE_NODE
+        return database._get_applied_migrations(MIGRATIONS_PACKAGE_NAME, replicated=replicated)
 
     def _create_database_if_not_exists(self, database: str, cluster: str):
         # MULTINODE_CLICKHOUSE: infi.clickhouse_orm creates the Distributed
