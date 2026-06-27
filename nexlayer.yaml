@@ -2,7 +2,7 @@ application:
   name: posthog
   pods:
   - name: app
-    image: us-east1-docker.pkg.dev/capture-by-auditdeploy/nexlayer-agent/posthog-singlenode:v2
+    image: us-east1-docker.pkg.dev/capture-by-auditdeploy/nexlayer-agent/posthog-singlenode:v3
     path: /
     servicePorts:
     - 8000
