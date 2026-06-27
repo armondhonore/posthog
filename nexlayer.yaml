@@ -2,11 +2,12 @@ application:
   name: posthog
   pods:
   - name: app
-    image: mirror.gcr.io/posthog/posthog:latest
+    image: us-east1-docker.pkg.dev/capture-by-auditdeploy/nexlayer-agent/posthog-singlenode:v1
     path: /
     servicePorts:
     - 8000
     vars:
+      CLICKHOUSE_SINGLE_NODE: "true"
       DATABASE_URL: "postgresql://posthog:posthog@postgres.pod:5432/posthog"
       REDIS_URL: "redis://redis.pod:6379"
       CLICKHOUSE_HOST: "clickhouse.pod"
