@@ -7,19 +7,15 @@ application:
     servicePorts:
     - 8000
     vars:
-      DATABASE_URL: "postgresql://posthog:posthog@posthog-postgres-service:5432/posthog"
-      REDIS_URL: "redis://posthog-redis-service:6379"
-      # ClickHouse (event store)
-      CLICKHOUSE_HOST: "posthog-clickhouse-service"
+      DATABASE_URL: "postgresql://posthog:posthog@postgres.pod:5432/posthog"
+      REDIS_URL: "redis://redis.pod:6379"
+      CLICKHOUSE_HOST: "clickhouse.pod"
       CLICKHOUSE_DATABASE: "posthog"
       CLICKHOUSE_USER: "default"
       CLICKHOUSE_PASSWORD: ""
       CLICKHOUSE_SECURE: "false"
       CLICKHOUSE_VERIFY: "false"
-      # Kafka (event ingestion bus)
-      KAFKA_HOSTS: "posthog-kafka-service:9092"
-      KAFKA_URL: "kafka://posthog-kafka-service:9092"
-      KAFKA_PRODUCER_ACKS: "1"
+      KAFKA_HOSTS: "kafka.pod:9092"
       SECRET_KEY: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
       SITE_URL: "https://relaxed-weasel-posthog.cloud.nexlayer.ai"
       IS_BEHIND_PROXY: "true"
@@ -32,9 +28,10 @@ application:
       POSTGRES_DB: posthog
       POSTGRES_USER: posthog
       POSTGRES_PASSWORD: posthog
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
     - name: posthog-db
-      mountPath: /var/lib/postgresql/data
+      mountPath: /var/lib/postgresql
       size: 10Gi
   - name: redis
     image: redis:7-alpine
@@ -49,7 +46,6 @@ application:
       CLICKHOUSE_DB: "posthog"
       CLICKHOUSE_USER: "default"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-      CLICKHOUSE_PASSWORD: ""
     volumes:
     - name: posthog-clickhouse
       mountPath: /var/lib/clickhouse
@@ -58,19 +54,19 @@ application:
     image: apache/kafka:3.8.0
     servicePorts:
     - 9092
+    - 9093
     vars:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://posthog-kafka-service:9092"
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka.pod:9092"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka.pod:9093"
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
       KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
     volumes:
